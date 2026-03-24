@@ -9,8 +9,8 @@ include:
   - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.7.1
   - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.7.1
 
-  # Code quality
-  - component: gitlab.com/devnw/ci-catalog/zig-format@v1.2.1
+  # Code quality — zig-format component replaced with inline job
+  # (v1.2.1 uses old Zig download URL format that 404s for 0.15.x)
 
   # SBOM
   - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.7.1
@@ -50,6 +50,17 @@ build:
     paths:
       - zig-out/
     expire_in: 1 hour
+
+# Format check
+zig-format:
+  stage: test
+  image: debian:bookworm-slim
+  before_script:
+    - *install-zig
+  script:
+    - zig fmt --check src/ tests/ build.zig
+  needs:
+    - build
 
 # Unit tests
 test:
