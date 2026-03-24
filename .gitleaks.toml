@@ -12,10 +12,7 @@ paths = [
     '''\.zig-cache''',
     '''zig-out''',
     '''\.git''',
+    # Zig source files contain crypto function names with "key" in them
+    # (wrapKey32, unwrapKey32, deriveKey32, etc.) which trigger false positives.
+    '''\.zig$''',
 ]
-
-# Add custom rules or allowlist entries as needed
-# [[rules]]
-# id = "custom-rule"
-# description = "Custom secret pattern"
-# regex = '''pattern'''
