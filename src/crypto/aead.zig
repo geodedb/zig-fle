@@ -142,7 +142,7 @@ pub fn encryptField(
     if (plaintext.len > max_plaintext_size) return Error.InvalidInput;
 
     var nonce: [12]u8 = undefined;
-    std.crypto.random.bytes(&nonce);
+    _ = std.os.linux.getrandom(@ptrCast(&nonce), @sizeOf(@TypeOf(nonce)), 0);
 
     const ciphertext = try allocator.alloc(u8, plaintext.len);
     errdefer allocator.free(ciphertext);
@@ -250,7 +250,7 @@ pub fn wrapKey32(key: [32]u8, wrapping_key: [32]u8) [wrapped_key_size]u8 {
     var result: [wrapped_key_size]u8 = undefined;
 
     var nonce: [24]u8 = undefined;
-    std.crypto.random.bytes(&nonce);
+    _ = std.os.linux.getrandom(@ptrCast(&nonce), @sizeOf(@TypeOf(nonce)), 0);
     @memcpy(result[0..24], &nonce);
 
     var tag: [16]u8 = undefined;
@@ -286,7 +286,7 @@ test "AEAD round-trip with AES-256-GCM" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.crypto.random.bytes(&fek);
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
 
     const plaintext = "sensitive data";
     const aad = try makeAAD(allocator, "tenant1", "Person", "ssn", "node123", 1);
@@ -311,7 +311,7 @@ test "AEAD auth fails with wrong AAD" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.crypto.random.bytes(&fek);
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
 
     const plaintext = "sensitive data";
     const aad1 = try makeAAD(allocator, "tenant1", "Person", "ssn", "node123", 1);
@@ -356,9 +356,9 @@ test "Envelope serialization round-trip" {
 
 test "wrapKey32/unwrapKey32 round-trip" {
     var key: [32]u8 = undefined;
-    std.crypto.random.bytes(&key);
+    _ = std.os.linux.getrandom(@ptrCast(&key), @sizeOf(@TypeOf(key)), 0);
     var wrapping_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&wrapping_key);
+    _ = std.os.linux.getrandom(@ptrCast(&wrapping_key), @sizeOf(@TypeOf(wrapping_key)), 0);
 
     const wrapped = wrapKey32(key, wrapping_key);
     const unwrapped = try unwrapKey32(&wrapped, wrapping_key);
@@ -368,14 +368,14 @@ test "wrapKey32/unwrapKey32 round-trip" {
 
 test "unwrapKey32 rejects wrong wrapping key" {
     var key: [32]u8 = undefined;
-    std.crypto.random.bytes(&key);
+    _ = std.os.linux.getrandom(@ptrCast(&key), @sizeOf(@TypeOf(key)), 0);
     var wrapping_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&wrapping_key);
+    _ = std.os.linux.getrandom(@ptrCast(&wrapping_key), @sizeOf(@TypeOf(wrapping_key)), 0);
 
     const wrapped = wrapKey32(key, wrapping_key);
 
     var wrong_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&wrong_key);
+    _ = std.os.linux.getrandom(@ptrCast(&wrong_key), @sizeOf(@TypeOf(wrong_key)), 0);
 
     const result = unwrapKey32(&wrapped, wrong_key);
     try std.testing.expectError(Error.AEADAuthFailed, result);
@@ -396,7 +396,7 @@ test "encryptField rejects xchacha20_poly1305" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.crypto.random.bytes(&fek);
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
 
     const aad = try makeAAD(allocator, "t", "s", "f", "r", 1);
     defer allocator.free(aad);
