@@ -186,7 +186,7 @@ pub fn decryptField(
 
     const plaintext = try allocator.alloc(u8, envelope.ciphertext.len);
 
-    const alg = std.meta.intToEnum(Alg, envelope.alg_id) catch {
+    const alg = @as(?Alg, @enumFromInt(envelope.alg_id)) orelse {
         std.crypto.secureZero(u8, plaintext);
         allocator.free(plaintext);
         return Error.InvalidAlg;
