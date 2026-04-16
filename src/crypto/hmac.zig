@@ -85,7 +85,7 @@ test "HMAC-SHA256 RFC 4231 test vector - Jefe" {
 
 test "Normalization for blind index" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -97,7 +97,7 @@ test "Normalization for blind index" {
 
 test "Token hex conversion round-trip" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

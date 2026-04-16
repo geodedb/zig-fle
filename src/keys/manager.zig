@@ -255,12 +255,12 @@ pub const KeyManager = struct {
 
 test "KeyManager FEK derivation and caching" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -284,12 +284,12 @@ test "KeyManager FEK derivation and caching" {
 
 test "KeyManager FEK rotation" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -325,12 +325,12 @@ test "KeyManager FEK rotation" {
 
 test "KeyManager BIK derivation" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -350,12 +350,12 @@ test "KeyManager BIK derivation" {
 
 test "KeyManager initWithProvider using StaticKeyProvider" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var static_prov = provider_mod.StaticKeyProvider.init(master_key);
     const prov = static_prov.provider();
@@ -381,12 +381,12 @@ test "KeyManager initWithProvider using StaticKeyProvider" {
 
 test "rotateFEK version persists across multiple rotations" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -403,12 +403,12 @@ test "rotateFEK version persists across multiple rotations" {
 
 test "clearCache forces re-derivation" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();

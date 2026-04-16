@@ -148,7 +148,7 @@ pub const BlindIndex = struct {
 
 test "BlindIndex put and lookup" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -156,7 +156,7 @@ test "BlindIndex put and lookup" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
-    std.crypto.random.bytes(&bik);
+    std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "alice@example.com", "person1");
     try index.put("Person", "email", bik, "alice@example.com", "person2");
@@ -177,7 +177,7 @@ test "BlindIndex put and lookup" {
 
 test "BlindIndex normalization handles case and whitespace" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -185,7 +185,7 @@ test "BlindIndex normalization handles case and whitespace" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
-    std.crypto.random.bytes(&bik);
+    std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "  Alice@EXAMPLE.com  ", "person1");
 
@@ -197,7 +197,7 @@ test "BlindIndex normalization handles case and whitespace" {
 
 test "BlindIndex remove" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -205,7 +205,7 @@ test "BlindIndex remove" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
-    std.crypto.random.bytes(&bik);
+    std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "alice@example.com", "person1");
     try index.put("Person", "email", bik, "alice@example.com", "person2");

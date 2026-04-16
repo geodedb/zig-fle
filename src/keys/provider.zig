@@ -133,7 +133,7 @@ pub const EnvKeyProvider = struct {
 
 test "StaticKeyProvider round-trip" {
     var key: [32]u8 = undefined;
-    std.crypto.random.bytes(&key);
+    std.Io.Threaded.global_single_threaded.io().random(&key);
 
     var static_prov = StaticKeyProvider.init(key);
     const prov = static_prov.provider();

@@ -14,13 +14,13 @@ const fle = @import("fle");
 // ============================================================================
 
 test "integration: full encrypt/decrypt lifecycle" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Create a master key (caller-provided, not from env)
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -67,12 +67,12 @@ test "integration: full encrypt/decrypt lifecycle" {
 // ============================================================================
 
 test "integration: key hierarchy produces distinct keys" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -96,12 +96,12 @@ test "integration: key hierarchy produces distinct keys" {
 // ============================================================================
 
 test "integration: key rotation produces new FEK" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -130,12 +130,12 @@ test "integration: key rotation produces new FEK" {
 // ============================================================================
 
 test "integration: blind index search on encrypted field" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.crypto.random.bytes(&master_key);
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -174,7 +174,7 @@ test "integration: blind index search on encrypted field" {
 // ============================================================================
 
 test "integration: annotation-driven encryption metadata" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -201,12 +201,12 @@ test "integration: annotation-driven encryption metadata" {
 // ============================================================================
 
 test "integration: ChaCha20-Poly1305 encrypt/decrypt" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.crypto.random.bytes(&fek);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const aad = try fle.aead.makeAAD(allocator, "t1", "X", "f", "r1", 1);
     defer allocator.free(aad);

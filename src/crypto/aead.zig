@@ -281,7 +281,7 @@ pub fn unwrapKey32(wrapped: *const [wrapped_key_size]u8, wrapping_key: [32]u8) !
 
 test "AEAD round-trip with AES-256-GCM" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -306,7 +306,7 @@ test "AEAD round-trip with AES-256-GCM" {
 
 test "AEAD auth fails with wrong AAD" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -328,7 +328,7 @@ test "AEAD auth fails with wrong AAD" {
 
 test "Envelope serialization round-trip" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -391,7 +391,7 @@ test "Alg nonceSz and name" {
 
 test "encryptField rejects xchacha20_poly1305" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -407,7 +407,7 @@ test "encryptField rejects xchacha20_poly1305" {
 
 test "makeAAD length-prefixed format" {
     const testing = std.testing;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

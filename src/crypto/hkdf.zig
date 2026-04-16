@@ -178,7 +178,7 @@ test "Key hierarchy derivation" {
     const testing = std.testing;
 
     var master: [32]u8 = undefined;
-    std.crypto.random.bytes(&master);
+    std.Io.Threaded.global_single_threaded.io().random(&master);
 
     const tenant_id = "tenant-123";
     const schema = "Person";
