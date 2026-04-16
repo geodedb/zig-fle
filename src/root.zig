@@ -82,6 +82,9 @@ pub const blind_index = @import("index/blind_index.zig");
 /// Schema annotation parsing and metadata
 pub const annotations = @import("schema/annotations.zig");
 
+/// Bulk encrypt/decrypt entry points (requires `thread_pool`).
+pub const bulk = @import("crypto/bulk.zig");
+
 // ============================================================================
 // Convenience aliases for the most common public types
 // ============================================================================
@@ -101,6 +104,13 @@ pub const EnvKeyProvider = key_provider.EnvKeyProvider;
 pub const AnnotationParser = annotations.AnnotationParser;
 pub const FieldMetadata = annotations.FieldMetadata;
 pub const TypeMetadata = annotations.TypeMetadata;
+pub const BulkField = bulk.BulkField;
+pub const BulkDecryptField = bulk.BulkDecryptField;
+pub const BulkResult = bulk.BulkResult;
+pub const BulkDecryptResult = bulk.BulkDecryptResult;
+pub const BulkOptions = bulk.BulkOptions;
+pub const encryptFieldsBulk = bulk.encryptFieldsBulk;
+pub const decryptFieldsBulk = bulk.decryptFieldsBulk;
 
 // ============================================================================
 // Unit Tests
