@@ -247,6 +247,62 @@ fn encryptChunkInline(c: *ChunkCtx) void {
     }
 }
 
+fn decryptOne(allocator: std.mem.Allocator, f: BulkDecryptField) BulkDecryptResult {
+    const aad = aead.makeAAD(
+        allocator,
+        f.tenant_id,
+        f.schema,
+        f.field,
+        f.record_id,
+        f.key_version,
+    ) catch |e| return .{ .err = toFleError(e) };
+    defer allocator.free(aad);
+
+    const pt = aead.decryptField(allocator, f.fek, aad, f.envelope) catch |e| {
+        return .{ .err = toFleError(e) };
+    };
+    return .{ .ok = .{ .plaintext = pt } };
+}
+
+const DecryptChunkCtx = struct {
+    allocator: std.mem.Allocator,
+    fields: []const BulkDecryptField,
+    out_slice: []BulkDecryptResult,
+    wg: *tp.WaitGroup,
+};
+
+fn decryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
+    const c: *DecryptChunkCtx = @ptrCast(@alignCast(ctx_));
+    decryptChunkInline(c);
+    c.wg.done();
+}
+
+fn decryptChunkInline(c: *DecryptChunkCtx) void {
+    var arena = std.heap.ArenaAllocator.init(c.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    for (c.fields, 0..) |f, idx| {
+        const aad = aead.makeAAD(
+            arena_alloc,
+            f.tenant_id,
+            f.schema,
+            f.field,
+            f.record_id,
+            f.key_version,
+        ) catch |e| {
+            c.out_slice[idx] = .{ .err = toFleError(e) };
+            continue;
+        };
+
+        const pt = aead.decryptField(c.allocator, f.fek, aad, f.envelope) catch |e| {
+            c.out_slice[idx] = .{ .err = toFleError(e) };
+            continue;
+        };
+        c.out_slice[idx] = .{ .ok = .{ .plaintext = pt } };
+    }
+}
+
 // ============================================================================
 // Unit Tests
 // ============================================================================
@@ -379,6 +435,84 @@ test "encryptFieldsBulk parallel: 10k fields across 4 workers" {
     }
 }
 
+test "decryptFieldsBulk: round-trip 10k envelopes through parallel encrypt + parallel decrypt" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pool = try tp.ThreadPool.init(allocator, .{ .max_threads = 4 });
+    defer {
+        _ = pool.shutdown(.drain, 5 * std.time.ns_per_s) catch {};
+        pool.deinit();
+    }
+
+    var fek: [32]u8 = undefined;
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+
+    const N = 10_000;
+    const enc_fields = try allocator.alloc(BulkField, N);
+    defer allocator.free(enc_fields);
+    const pts = try allocator.alloc([]u8, N);
+    defer {
+        for (pts) |p| allocator.free(p);
+        allocator.free(pts);
+    }
+    for (0..N) |i| {
+        pts[i] = try std.fmt.allocPrint(allocator, "plaintext-{d}", .{i});
+        enc_fields[i] = .{
+            .fek = &fek,
+            .alg = .aes256_gcm,
+            .tenant_id = "t",
+            .schema = "S",
+            .field = "f",
+            .record_id = "r",
+            .key_version = 1,
+            .plaintext = pts[i],
+        };
+    }
+
+    const enc_results = try allocator.alloc(BulkResult, N);
+    defer {
+        for (enc_results) |*r| switch (r.*) {
+            .ok => |*env| env.deinit(allocator),
+            .err => {},
+        };
+        allocator.free(enc_results);
+    }
+    _ = try encryptFieldsBulk(allocator, &pool, enc_fields, enc_results, .{ .chunk_size = 1024 });
+
+    const dec_fields = try allocator.alloc(BulkDecryptField, N);
+    defer allocator.free(dec_fields);
+    for (0..N) |i| {
+        dec_fields[i] = .{
+            .fek = &fek,
+            .tenant_id = "t",
+            .schema = "S",
+            .field = "f",
+            .record_id = "r",
+            .key_version = 1,
+            .envelope = enc_results[i].ok,
+        };
+    }
+
+    const dec_results = try allocator.alloc(BulkDecryptResult, N);
+    defer {
+        for (dec_results) |*r| switch (r.*) {
+            .ok => |ok| {
+                std.crypto.secureZero(u8, ok.plaintext);
+                allocator.free(ok.plaintext);
+            },
+            .err => {},
+        };
+        allocator.free(dec_results);
+    }
+    const ok_dec = try decryptFieldsBulk(allocator, &pool, dec_fields, dec_results, .{ .chunk_size = 1024 });
+    try testing.expectEqual(N, ok_dec);
+    try testing.expectEqualStrings(pts[42], dec_results[42].ok.plaintext);
+    try testing.expectEqualStrings(pts[9876], dec_results[9876].ok.plaintext);
+}
+
 /// Decrypt `fields.len` envelopes in bulk. `out_results` MUST be the
 /// same length as `fields`. Returns the count of `BulkDecryptResult.ok`.
 pub fn decryptFieldsBulk(
@@ -388,10 +522,57 @@ pub fn decryptFieldsBulk(
     out_results: []BulkDecryptResult,
     options: BulkOptions,
 ) !usize {
-    _ = allocator;
-    _ = pool;
-    _ = fields;
-    _ = out_results;
-    _ = options;
-    @panic("decryptFieldsBulk: not implemented");
+    std.debug.assert(out_results.len == fields.len);
+    if (fields.len == 0) return 0;
+
+    if (pool == null or fields.len == 1) {
+        var ok_count: usize = 0;
+        for (fields, 0..) |f, idx| {
+            out_results[idx] = decryptOne(allocator, f);
+            if (out_results[idx] == .ok) ok_count += 1;
+        }
+        return ok_count;
+    }
+
+    const chunk_size = if (options.chunk_size == 0) default_chunk_size else options.chunk_size;
+    const p = pool.?;
+    const n_chunks = (fields.len + chunk_size - 1) / chunk_size;
+
+    const ctxs = try allocator.alloc(DecryptChunkCtx, n_chunks);
+    defer allocator.free(ctxs);
+
+    var wg = p.waitGroup();
+
+    var i: usize = 0;
+    var ci: usize = 0;
+    while (i < fields.len) : (ci += 1) {
+        const end = @min(i + chunk_size, fields.len);
+        ctxs[ci] = .{
+            .allocator = allocator,
+            .fields = fields[i..end],
+            .out_slice = out_results[i..end],
+            .wg = &wg,
+        };
+        i = end;
+    }
+    wg.add(@intCast(n_chunks));
+
+    for (ctxs, 0..) |*c, k| {
+        _ = p.submit(decryptChunk, c, .{ .lane = options.lane }) catch {
+            // Partial-success: run remaining chunks inline, each manually
+            // decrementing the WaitGroup.
+            for (ctxs[k..]) |*rest| {
+                decryptChunkInline(rest);
+                rest.wg.done();
+            }
+            break;
+        };
+    }
+    wg.wait();
+
+    var ok_count: usize = 0;
+    for (out_results) |r| if (r == .ok) {
+        ok_count += 1;
+    };
+    return ok_count;
 }
