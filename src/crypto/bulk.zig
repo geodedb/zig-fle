@@ -95,14 +95,66 @@ pub fn encryptFieldsBulk(
     options: BulkOptions,
 ) !usize {
     std.debug.assert(out_results.len == fields.len);
-    _ = options; // serial path ignores chunk_size/lane
-    _ = pool; // Task 4 wires pool; serial ignores it
+    if (fields.len == 0) return 0;
+
+    // Serial fallback.
+    if (pool == null or fields.len == 1) {
+        var ok_count: usize = 0;
+        for (fields, 0..) |f, idx| {
+            out_results[idx] = encryptOne(allocator, f);
+            if (out_results[idx] == .ok) ok_count += 1;
+        }
+        return ok_count;
+    }
+
+    const chunk_size = if (options.chunk_size == 0) default_chunk_size else options.chunk_size;
+    const p = pool.?;
+
+    const n_chunks = (fields.len + chunk_size - 1) / chunk_size;
+    const ctxs = try allocator.alloc(ChunkCtx, n_chunks);
+    defer allocator.free(ctxs);
+
+    var wg = p.waitGroup();
+
+    // Pre-populate chunk contexts before submission.
+    var i: usize = 0;
+    var ci: usize = 0;
+    while (i < fields.len) : (ci += 1) {
+        const end = @min(i + chunk_size, fields.len);
+        ctxs[ci] = .{
+            .allocator = allocator,
+            .fields = fields[i..end],
+            .out_slice = out_results[i..end],
+            .wg = &wg,
+        };
+        i = end;
+    }
+
+    // WaitGroup.add(n_chunks) BEFORE any submission — prevents a fast-finishing
+    // task from calling done() before add() runs (underflow / premature unblock).
+    wg.add(@intCast(n_chunks));
+
+    // Submit each chunk. On submit failure, run remaining chunks inline so that
+    // partial-success semantics are preserved and wg.done() is always called.
+    for (ctxs, 0..) |*c, k| {
+        _ = p.submit(encryptChunk, c, .{
+            .lane = options.lane,
+        }) catch {
+            // Run this chunk and all remaining chunks inline.
+            for (ctxs[k..]) |*rest| {
+                encryptChunkInline(rest);
+                rest.wg.done();
+            }
+            break;
+        };
+    }
+
+    wg.wait();
 
     var ok_count: usize = 0;
-    for (fields, 0..) |f, idx| {
-        out_results[idx] = encryptOne(allocator, f);
-        if (out_results[idx] == .ok) ok_count += 1;
-    }
+    for (out_results) |r| if (r == .ok) {
+        ok_count += 1;
+    };
     return ok_count;
 }
 
@@ -144,6 +196,55 @@ fn toFleError(e: anyerror) Error {
         error.SearchNotPermitted => Error.SearchNotPermitted,
         else => Error.InvalidInput, // defensive catch-all
     };
+}
+
+const ChunkCtx = struct {
+    allocator: std.mem.Allocator,
+    fields: []const BulkField,
+    out_slice: []BulkResult,
+    wg: *tp.WaitGroup,
+};
+
+fn encryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
+    const c: *ChunkCtx = @ptrCast(@alignCast(ctx_));
+    encryptChunkInline(c);
+    c.wg.done();
+}
+
+fn encryptChunkInline(c: *ChunkCtx) void {
+    // Arena scoped to this chunk — keeps per-field AAD allocations out of
+    // the global allocator hot path. AAD lifetime: single encrypt call.
+    var arena = std.heap.ArenaAllocator.init(c.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    for (c.fields, 0..) |f, idx| {
+        const aad_bytes = aead.makeAAD(
+            arena_alloc,
+            f.tenant_id,
+            f.schema,
+            f.field,
+            f.record_id,
+            f.key_version,
+        ) catch |e| {
+            c.out_slice[idx] = .{ .err = toFleError(e) };
+            continue;
+        };
+
+        const env = aead.encryptField(
+            c.allocator, // envelope ciphertext outlives the chunk → global allocator
+            f.alg,
+            f.fek,
+            aad_bytes,
+            f.plaintext,
+            f.key_version,
+        ) catch |e| {
+            c.out_slice[idx] = .{ .err = toFleError(e) };
+            continue;
+        };
+
+        c.out_slice[idx] = .{ .ok = env };
+    }
 }
 
 // ============================================================================
@@ -210,6 +311,72 @@ test "encryptFieldsBulk serial: partial success — oversized plaintext errors o
     try testing.expect(results[1] == .err);
     try testing.expectEqual(Error.InvalidInput, results[1].err);
     try testing.expect(results[2] == .ok);
+}
+
+test "encryptFieldsBulk parallel: 10k fields across 4 workers" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pool = try tp.ThreadPool.init(allocator, .{ .max_threads = 4 });
+    defer {
+        _ = pool.shutdown(.drain, 5 * std.time.ns_per_s) catch {};
+        pool.deinit();
+    }
+
+    var fek: [32]u8 = undefined;
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+
+    const N = 10_000;
+    const fields = try allocator.alloc(BulkField, N);
+    defer allocator.free(fields);
+    const pt_bufs = try allocator.alloc([]u8, N);
+    defer {
+        for (pt_bufs) |b| allocator.free(b);
+        allocator.free(pt_bufs);
+    }
+    for (0..N) |i| {
+        pt_bufs[i] = try std.fmt.allocPrint(allocator, "pt-{d}", .{i});
+        fields[i] = .{
+            .fek = &fek,
+            .alg = .aes256_gcm,
+            .tenant_id = "t",
+            .schema = "S",
+            .field = "f",
+            .record_id = "r",
+            .key_version = 1,
+            .plaintext = pt_bufs[i],
+        };
+    }
+
+    const results = try allocator.alloc(BulkResult, N);
+    defer {
+        for (results) |*r| switch (r.*) {
+            .ok => |*env| env.deinit(allocator),
+            .err => {},
+        };
+        allocator.free(results);
+    }
+
+    const stats_before = pool.statsSnapshot();
+    const ok_count = try encryptFieldsBulk(allocator, &pool, fields, results, .{ .chunk_size = 512 });
+    const stats_after = pool.statsSnapshot();
+    // N=10k / chunk_size=512 = ~20 chunks; expect at least that many submissions.
+    try testing.expect(stats_after.submitted - stats_before.submitted >= 19);
+    try testing.expectEqual(N, ok_count);
+
+    // Spot-check: decrypt field 42 and 7777 round-trips.
+    for ([_]usize{ 42, 7777 }) |idx| {
+        const aad = try aead.makeAAD(allocator, "t", "S", "f", "r", 1);
+        defer allocator.free(aad);
+        const pt = try aead.decryptField(allocator, &fek, aad, results[idx].ok);
+        defer {
+            std.crypto.secureZero(u8, pt);
+            allocator.free(pt);
+        }
+        try testing.expectEqualStrings(pt_bufs[idx], pt);
+    }
 }
 
 /// Decrypt `fields.len` envelopes in bulk. `out_results` MUST be the
