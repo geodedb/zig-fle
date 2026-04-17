@@ -22,6 +22,11 @@
 //! across threads. Stateless functions (`encryptField`, `decryptField`,
 //! `hkdfSha256`, `wrapKey32`, `unwrapKey32`) are safe to call concurrently.
 //!
+//! For high-throughput workloads, see the `bulk` submodule
+//! (`encryptFieldsBulk`, `decryptFieldsBulk`) which dispatches per-field
+//! AEAD work across a caller-provided `thread_pool.ThreadPool` with
+//! partial-success error semantics.
+//!
 //! ## Quick Start
 //!
 //! ```zig
