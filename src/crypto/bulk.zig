@@ -24,7 +24,7 @@ pub const Error = aead.Error;
 /// Default number of fields per worker task. See plan Background §3:
 /// AES-NI AES-GCM at GB/s means sub-microsecond per-field submit overhead
 /// dominates unless we chunk.
-pub const default_chunk_size: usize = 1024;
+pub const default_chunk_size: usize = 4096;
 
 /// One field's worth of input for a bulk encrypt call.
 ///

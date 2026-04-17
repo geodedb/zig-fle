@@ -54,6 +54,23 @@ pub fn build(b: *std.Build) void {
     const run_integration_tests = b.addRunArtifact(integration_tests);
     integration_step.dependOn(&run_integration_tests.step);
 
+    // Bench step
+    const bench_step = b.step("bench", "Run micro-benchmarks");
+    const bench_exe = b.addExecutable(.{
+        .name = "fle_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "fle", .module = module },
+                .{ .name = "thread_pool", .module = thread_pool_module },
+            },
+        }),
+    });
+    const run_bench = b.addRunArtifact(bench_exe);
+    bench_step.dependOn(&run_bench.step);
+
     // Check step
     const check_step = b.step("check", "Check for compilation errors");
     const check = b.addTest(.{
