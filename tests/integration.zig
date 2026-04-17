@@ -230,3 +230,83 @@ test "integration: ChaCha20-Poly1305 encrypt/decrypt" {
 test "integration: version is defined" {
     try std.testing.expectEqualStrings("0.1.0", fle.version);
 }
+
+// ============================================================================
+// Bulk parallel == serial correctness property
+// ============================================================================
+
+test "bulk parallel matches serial for identical inputs" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const tp = @import("thread_pool");
+
+    var pool = try tp.ThreadPool.init(allocator, .{ .max_threads = 4 });
+    defer {
+        _ = pool.shutdown(.drain, 5 * std.time.ns_per_s) catch {};
+        pool.deinit();
+    }
+
+    var fek: [32]u8 = undefined;
+    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+
+    const N = 2048;
+    const fields = try allocator.alloc(fle.BulkField, N);
+    defer allocator.free(fields);
+    for (0..N) |i| {
+        const pt = try std.fmt.allocPrint(allocator, "v-{d}", .{i});
+        fields[i] = .{
+            .fek = &fek,
+            .alg = .aes256_gcm,
+            .tenant_id = "t",
+            .schema = "S",
+            .field = "f",
+            .record_id = "r",
+            .key_version = 1,
+            .plaintext = pt,
+        };
+    }
+    defer for (fields) |f| allocator.free(@constCast(f.plaintext));
+
+    // Serial encrypt — source of truth.
+    const serial_results = try allocator.alloc(fle.BulkResult, N);
+    defer {
+        for (serial_results) |*r| switch (r.*) {
+            .ok => |*env| env.deinit(allocator),
+            .err => {},
+        };
+        allocator.free(serial_results);
+    }
+    _ = try fle.encryptFieldsBulk(allocator, null, fields, serial_results, .{});
+
+    // Parallel encrypt.
+    const parallel_results = try allocator.alloc(fle.BulkResult, N);
+    defer {
+        for (parallel_results) |*r| switch (r.*) {
+            .ok => |*env| env.deinit(allocator),
+            .err => {},
+        };
+        allocator.free(parallel_results);
+    }
+    _ = try fle.encryptFieldsBulk(allocator, &pool, fields, parallel_results, .{ .chunk_size = 256 });
+
+    // Both must decrypt to the same plaintext using serial decrypt.
+    for (0..N) |i| {
+        const aad = try fle.aead.makeAAD(allocator, "t", "S", "f", "r", 1);
+        defer allocator.free(aad);
+        const pt_serial = try fle.aead.decryptField(allocator, &fek, aad, serial_results[i].ok);
+        defer {
+            std.crypto.secureZero(u8, pt_serial);
+            allocator.free(pt_serial);
+        }
+        const pt_parallel = try fle.aead.decryptField(allocator, &fek, aad, parallel_results[i].ok);
+        defer {
+            std.crypto.secureZero(u8, pt_parallel);
+            allocator.free(pt_parallel);
+        }
+        try testing.expectEqualStrings(pt_serial, pt_parallel);
+        try testing.expectEqualStrings(fields[i].plaintext, pt_parallel);
+    }
+}
