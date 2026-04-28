@@ -16,6 +16,7 @@ const std = @import("std");
 const tp = @import("thread_pool");
 
 const aead = @import("aead.zig");
+const observability = @import("observability");
 
 pub const Alg = aead.Alg;
 pub const EnvelopeV1 = aead.EnvelopeV1;
@@ -94,8 +95,21 @@ pub fn encryptFieldsBulk(
     out_results: []BulkResult,
     options: BulkOptions,
 ) !usize {
+    // ONE span per bulk call (not per field) per the otel rollout
+    // spec. Per-field schema names + algorithms live on each
+    // BulkField and are intentionally NOT aggregated as attributes
+    // here to avoid cardinality blow-up. SECURITY: per-field `fek`,
+    // `plaintext`, `aad`, `record_id`, `tenant_id`, `schema`, and
+    // `field` are NEVER attached.
+    var __obs_span = observability.startFleSpan("bulk_encrypt", "", "");
+    defer __obs_span.end(null);
+    errdefer observability.endFleSpan(__obs_span, false);
+
     std.debug.assert(out_results.len == fields.len);
-    if (fields.len == 0) return 0;
+    if (fields.len == 0) {
+        observability.endFleSpan(__obs_span, true);
+        return 0;
+    }
 
     // Serial fallback.
     if (pool == null or fields.len == 1) {
@@ -104,6 +118,7 @@ pub fn encryptFieldsBulk(
             out_results[idx] = encryptOne(allocator, f);
             if (out_results[idx] == .ok) ok_count += 1;
         }
+        observability.endFleSpan(__obs_span, true);
         return ok_count;
     }
 
@@ -155,6 +170,7 @@ pub fn encryptFieldsBulk(
     for (out_results) |r| if (r == .ok) {
         ok_count += 1;
     };
+    observability.endFleSpan(__obs_span, true);
     return ok_count;
 }
 
@@ -522,8 +538,19 @@ pub fn decryptFieldsBulk(
     out_results: []BulkDecryptResult,
     options: BulkOptions,
 ) !usize {
+    // ONE span per bulk call (not per field). Same security
+    // invariants as encryptFieldsBulk: per-field `fek`, ciphertext,
+    // tag, nonce, AAD, record_id, tenant_id, schema, and field are
+    // NEVER attached.
+    var __obs_span = observability.startFleSpan("bulk_decrypt", "", "");
+    defer __obs_span.end(null);
+    errdefer observability.endFleSpan(__obs_span, false);
+
     std.debug.assert(out_results.len == fields.len);
-    if (fields.len == 0) return 0;
+    if (fields.len == 0) {
+        observability.endFleSpan(__obs_span, true);
+        return 0;
+    }
 
     if (pool == null or fields.len == 1) {
         var ok_count: usize = 0;
@@ -531,6 +558,7 @@ pub fn decryptFieldsBulk(
             out_results[idx] = decryptOne(allocator, f);
             if (out_results[idx] == .ok) ok_count += 1;
         }
+        observability.endFleSpan(__obs_span, true);
         return ok_count;
     }
 
@@ -574,5 +602,6 @@ pub fn decryptFieldsBulk(
     for (out_results) |r| if (r == .ok) {
         ok_count += 1;
     };
+    observability.endFleSpan(__obs_span, true);
     return ok_count;
 }

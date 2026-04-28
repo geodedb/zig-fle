@@ -6,6 +6,7 @@ const types = @import("types.zig");
 const provider_mod = @import("provider.zig");
 const aead = @import("../crypto/aead.zig");
 const hkdf = @import("../crypto/hkdf.zig");
+const observability = @import("observability");
 
 pub const Error = error{
     KeyNotFound,
@@ -197,6 +198,14 @@ pub const KeyManager = struct {
         schema: []const u8,
         field: []const u8,
     ) !u16 {
+        // Span attrs: only the schema-level field name. SECURITY: the
+        // 32-byte master key, derived FEKs/BIKs, and key version
+        // integers are NEVER attached. Rotation involves no AEAD
+        // primitive, so `fle.algorithm` is empty.
+        var __obs_span = observability.startFleSpan("rotate_key", field, "");
+        defer __obs_span.end(null);
+        errdefer observability.endFleSpan(__obs_span, false);
+
         const key_path = try std.fmt.allocPrint(self.allocator, "{s}:{s}:{s}", .{
             tenant,
             schema,
@@ -205,7 +214,10 @@ pub const KeyManager = struct {
         errdefer self.allocator.free(key_path);
 
         const current_version = self.getKeyVersion(key_path);
-        if (current_version == std.math.maxInt(u16)) return Error.InvalidKeyVersion;
+        if (current_version == std.math.maxInt(u16)) {
+            observability.endFleSpan(__obs_span, false);
+            return Error.InvalidKeyVersion;
+        }
         const new_version = current_version + 1;
 
         // Use getOrPut to atomically insert/update without a window where
@@ -218,6 +230,7 @@ pub const KeyManager = struct {
         // else: map now owns key_path via getOrPut
         gop.value_ptr.* = new_version;
 
+        observability.endFleSpan(__obs_span, true);
         return new_version;
     }
 

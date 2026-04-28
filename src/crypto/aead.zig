@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2025 CodePros
 
 const std = @import("std");
+const observability = @import("observability");
 
 /// Supported AEAD algorithms.
 /// Wire values are stable for serialized envelopes and cross-project use.
@@ -138,6 +139,15 @@ pub fn encryptField(
     plaintext: []const u8,
     key_version: u16,
 ) !EnvelopeV1 {
+    // Span attrs: fle.algorithm only. The schema-level field name is
+    // buried inside the opaque AAD byte slice at this layer and is
+    // intentionally NOT propagated as `fle.field` here — the bulk path
+    // populates it from `BulkField.field`. SECURITY: `fek`, `aad`,
+    // `plaintext`, and `ciphertext` are NEVER included as attributes.
+    var __obs_span = observability.startFleSpan("encrypt", "", alg.name());
+    defer __obs_span.end(null);
+    errdefer observability.endFleSpan(__obs_span, false);
+
     if (fek.len != 32) return Error.InvalidKey;
     if (plaintext.len > max_plaintext_size) return Error.InvalidInput;
 
@@ -166,6 +176,7 @@ pub fn encryptField(
         },
     }
 
+    observability.endFleSpan(__obs_span, true);
     return EnvelopeV1{
         .alg_id = @intFromEnum(alg),
         .key_version = key_version,
@@ -182,6 +193,18 @@ pub fn decryptField(
     aad: []const u8,
     envelope: EnvelopeV1,
 ) ![]u8 {
+    // Span attrs: only algorithm (resolved from envelope.alg_id below
+    // when valid). Schema-level field name lives in opaque AAD; bulk
+    // path overrides. SECURITY: `fek`, `aad`, `envelope.ciphertext`,
+    // and resulting plaintext are NEVER attributes.
+    const alg_name: []const u8 = if (envelope.alg_id >= 1 and envelope.alg_id <= 3)
+        (@as(Alg, @enumFromInt(envelope.alg_id))).name()
+    else
+        "";
+    var __obs_span = observability.startFleSpan("decrypt", "", alg_name);
+    defer __obs_span.end(null);
+    errdefer observability.endFleSpan(__obs_span, false);
+
     if (fek.len != 32) return Error.InvalidKey;
 
     const plaintext = try allocator.alloc(u8, envelope.ciphertext.len);
@@ -191,6 +214,7 @@ pub fn decryptField(
     } else {
         std.crypto.secureZero(u8, plaintext);
         allocator.free(plaintext);
+        observability.endFleSpan(__obs_span, false);
         return Error.InvalidAlg;
     };
 
@@ -207,6 +231,7 @@ pub fn decryptField(
             ) catch {
                 std.crypto.secureZero(u8, plaintext);
                 allocator.free(plaintext);
+                observability.endFleSpan(__obs_span, false);
                 return Error.AEADAuthFailed;
             };
         },
@@ -222,6 +247,7 @@ pub fn decryptField(
             ) catch {
                 std.crypto.secureZero(u8, plaintext);
                 allocator.free(plaintext);
+                observability.endFleSpan(__obs_span, false);
                 return Error.AEADAuthFailed;
             };
         },
@@ -230,10 +256,12 @@ pub fn decryptField(
             // Use unwrapKey32 for key unwrapping or the raw primitive directly.
             std.crypto.secureZero(u8, plaintext);
             allocator.free(plaintext);
+            observability.endFleSpan(__obs_span, false);
             return Error.InvalidAlg;
         },
     }
 
+    observability.endFleSpan(__obs_span, true);
     return plaintext;
 }
 
