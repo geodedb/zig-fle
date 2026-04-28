@@ -70,6 +70,55 @@ make dev
 make ci
 ```
 
+## Observability
+
+`fle` ships an opt-in OpenTelemetry seam. Build with `-Dwith_otel=true`
+to compile in instrumentation; the default (`-Dwith_otel=false`)
+leaves every span site as a comptime no-op so the optimizer
+eliminates the entry/exit calls and the `otel` dependency is never
+fetched.
+
+Each public FLE crypto entry point emits exactly one span per call,
+named `fle.{operation}`:
+
+| Entry point                  | Span name          |
+|------------------------------|--------------------|
+| `aead.encryptField`          | `fle.encrypt`      |
+| `aead.decryptField`          | `fle.decrypt`      |
+| `KeyManager.rotateFEK`       | `fle.rotate_key`   |
+| `bulk.encryptFieldsBulk`     | `fle.bulk_encrypt` |
+| `bulk.decryptFieldsBulk`     | `fle.bulk_decrypt` |
+
+The bulk entry points emit ONE span per call (not per field).
+
+Span attributes are limited to:
+
+- `fle.field` — schema-level field name (e.g. `"ssn"`, `"email"`).
+  NEVER the field VALUE.
+- `fle.algorithm` — AEAD algorithm name (e.g. `"aes-256-gcm"`).
+
+**Security**: plaintext, ciphertext, AAD bytes, the master key,
+derived FEKs/BIKs, key versions, tenant ids, record ids, and
+schema names are NEVER attached as span attributes. If your
+application's schema-level field names are themselves sensitive,
+hash them BEFORE calling the FLE API — the seam does no hashing.
+
+```bash
+zig build test                  # default: -Dwith_otel=false (no-op)
+zig build test -Dwith_otel=true # otel compiled in, spans emitted
+```
+
+When enabled, the consumer's process bootstrap calls
+`fle.observability_init.Otel.init(allocator, "service-name")` and
+parks the returned value at a stable address (a `var` in `main` or
+a heap allocation), then calls `installGlobals(&that_value)` so the
+seam can publish its tracer pointer. Span emission is non-fatal:
+every emit is `catch {}`-discarded so a failed exporter cannot
+propagate into FLE crypto operations.
+
+For the full integration recipe and template files, see
+`otel/docs/integration/RECIPE.md` in the otel repo.
+
 ## Documentation
 
 See the [docs](docs/) directory for detailed documentation.
