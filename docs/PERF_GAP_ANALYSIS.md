@@ -31,9 +31,18 @@ Source review: 2026-06-11 performance audit of the AEAD/bulk/blind-index hot pat
 
 Under the corrected benchmark methodology (smp_allocator + ReleaseFast module graph + serial-arena fix), parallel bulk now measures **~590 ns/field** while serial measures **~434 ns/field** at 100k fields × 64 bytes. Thread-pool dispatch overhead dominates at this field size: the per-field AEAD work is too cheap relative to chunk submission, wakeup, and join costs.
 
-Recommended next steps (not yet implemented):
+Status: **Resolved (documented break-even)** — measured the serial/parallel break-even across payload sizes and documented it instead of adding auto-fallback heuristics. The break-even sits around **~128–256 bytes per field**: serial wins below it, parallel wins above. Guidance added to the `src/crypto/bulk.zig` module doc; `tests/bench.zig` now sweeps payload sizes {64B, 1KiB, 16KiB} so the break-even stays visible in future runs.
 
-- Revisit chunk sizing and pool tuning (larger chunks, fewer submissions) for small-payload workloads.
-- Alternatively, document bulk's break-even point (payload size × field count) so consumers choose serial vs parallel deliberately, or auto-fall-back to the serial arena path below the break-even threshold.
+Measured 2026-06-11 (ReleaseFast, smp_allocator, 8-thread pool, cs=1024, best of 3):
 
-Status: Open (tracked as the only open performance item).
+| Payload | N | Serial ns/field | Parallel ns/field | Winner |
+|---|---|---|---|---|
+| 64 B | 100,000 | 421.0 | 575.1 | serial |
+| 128 B | 100,000 | 473.0 | 508.2 | serial (marginal) |
+| 256 B | 100,000 | 768.2 | 631.3 | parallel |
+| 512 B | 50,000 | 890.1 | 641.5 | parallel |
+| 1 KiB | 20,000 | 1062.4 | 594.5 | parallel |
+| 4 KiB | 10,000 | 2988.8 | 1319.4 | parallel |
+| 16 KiB | 4,000 | 10133.6 | 4899.6 | parallel |
+
+Chunk-size tuning (cs=256 → cs=4096) moves throughput only a few percent; payload size is the deciding factor. Recommendation for consumers: pass `pool = null` for batches of small fields (below ~256 B each); supply a pool above that.

@@ -17,6 +17,18 @@
 //! concurrently. (`std.heap.smp_allocator`, `std.heap.page_allocator`, and
 //! the default-config DebugAllocator are thread-safe; a bare
 //! `ArenaAllocator` is not.)
+//!
+//! Performance guidance (PERF-FU-001): thread-pool dispatch costs dominate
+//! when individual fields are small — AES-NI AES-GCM on a 64-byte field is
+//! far cheaper than chunk submission, worker wakeup, and join. On the
+//! 2026-06-11 reference machine (ReleaseFast, smp_allocator, 8-thread pool,
+//! cs=1024), serial measured 421 ns/field vs 575 ns/field parallel at 64B,
+//! roughly tied at 128B (473 vs 508), and parallel won from 256B up (768 vs
+//! 631 at 256B, 1062 vs 595 at 1KiB, 10134 vs 4900 at 16KiB). Rule of
+//! thumb: prefer `pool = null` for batches of fields below ~256 bytes each;
+//! use a pool above that. `BulkOptions.chunk_size` tuning matters far less
+//! than payload size — throughput is flat within a few percent from cs=256
+//! to cs=4096.
 
 const std = @import("std");
 const tp = @import("thread_pool");
