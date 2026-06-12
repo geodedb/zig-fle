@@ -51,7 +51,7 @@
 //!
 //! // Create a key manager with an explicit master key
 //! var master_key: [32]u8 = undefined;
-//! std.crypto.random.bytes(&master_key);
+//! std.Io.Threaded.global_single_threaded.io().random(&master_key);
 //! var km = try fle.KeyManager.init(allocator, master_key);
 //! defer km.deinit();
 //!

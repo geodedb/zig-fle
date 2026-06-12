@@ -1,7 +1,7 @@
 # fle
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Zig](https://img.shields.io/badge/Zig-0.15.1+-orange.svg)](https://ziglang.org/)
+[![Zig](https://img.shields.io/badge/Zig-0.16.0+-orange.svg)](https://ziglang.org/)
 
 A portable Zig library for field-level encryption (FLE) with searchable
 blind indices and hierarchical key management.
@@ -88,7 +88,7 @@ Complete runnable programs live in [examples/](examples/) — run them with
 
 ## Requirements
 
-- Zig 0.15.1 or later
+- Zig 0.16.0 or later
 
 ## Building
 

@@ -41,8 +41,9 @@ This project implements:
 
 - **Memory Safety**: Zig's compile-time memory safety checks
 - **Safety-Checked Builds**: Debug/ReleaseSafe builds are exercised in CI
-  alongside ReleaseFast/ReleaseSmall; randomness comes from the process
-  CSPRNG (`std.Io` `random`, never silently uninitialized); untrusted
+  alongside ReleaseFast/ReleaseSmall; randomness comes from
+  `std.Io.Threaded.global_single_threaded.io().random` (the process
+  CSPRNG; never silently uninitialized); untrusted
   envelope parsing is bounds-checked with fuzz coverage
 - **Dependency Scanning**: Automated security scanning in CI
 - **Secret Detection**: Gitleaks scanning for leaked credentials
