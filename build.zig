@@ -170,6 +170,26 @@ pub fn build(b: *std.Build) void {
     if (observability_init_mod) |m| check.root_module.addImport("observability_init", m);
     if (otel_mod) |m| check.root_module.addImport("otel", m);
     check_step.dependOn(&check.step);
+
+    // Examples — compiled in `check`, runnable via `zig build examples`.
+    const examples_step = b.step("examples", "Build and run examples");
+    inline for (.{ "basic", "annotations", "bulk" }) |ex_name| {
+        const ex = b.addExecutable(.{
+            .name = "example_" ++ ex_name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("examples/" ++ ex_name ++ ".zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "fle", .module = module },
+                    .{ .name = "thread_pool", .module = thread_pool_module },
+                },
+            }),
+        });
+        const run_ex = b.addRunArtifact(ex);
+        examples_step.dependOn(&run_ex.step);
+        check_step.dependOn(&ex.step); // examples can't rot: compile in check
+    }
 }
 
 // ============================================================================
