@@ -118,6 +118,7 @@ pub const deriveKey32 = hkdf.deriveKey32;
 pub const KeyManager = key_manager.KeyManager;
 pub const KeyIds = key_types.KeyIds;
 pub const BlindIndex = blind_index.BlindIndex;
+pub const BlindIndexToken = blind_index.BlindIndexToken;
 pub const MasterKeyProvider = key_provider.MasterKeyProvider;
 pub const StaticKeyProvider = key_provider.StaticKeyProvider;
 pub const EnvKeyProvider = key_provider.EnvKeyProvider;

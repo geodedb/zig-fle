@@ -62,7 +62,10 @@ pub const BlindIndex = struct {
         defer self.allocator.free(field_key);
 
         const normalized = try hmac_mod.normalizeForBlindIndex(self.allocator, plaintext);
-        defer self.allocator.free(normalized);
+        defer {
+            std.crypto.secureZero(u8, normalized);
+            self.allocator.free(normalized);
+        }
 
         var token: BlindIndexToken = undefined;
         hmac_mod.blindIndexHmac256(&token, &bik, normalized);
@@ -102,7 +105,12 @@ pub const BlindIndex = struct {
         try token_gop.value_ptr.append(self.allocator, owned_id);
     }
 
-    /// Lookup record IDs matching a plaintext value
+    /// Lookup record IDs matching a plaintext value.
+    ///
+    /// LIFETIME: the returned slice borrows index-internal storage and is
+    /// valid only until the next mutating call (`put`, `remove`, `deinit`)
+    /// on this BlindIndex. Callers that need to retain results must copy
+    /// them before mutating the index.
     pub fn lookup(
         self: *BlindIndex,
         schema: []const u8,
@@ -116,7 +124,10 @@ pub const BlindIndex = struct {
         const token_map = self.indices.get(field_key) orelse return null;
 
         const normalized = try hmac_mod.normalizeForBlindIndex(self.allocator, plaintext);
-        defer self.allocator.free(normalized);
+        defer {
+            std.crypto.secureZero(u8, normalized);
+            self.allocator.free(normalized);
+        }
 
         var token: BlindIndexToken = undefined;
         hmac_mod.blindIndexHmac256(&token, &bik, normalized);
