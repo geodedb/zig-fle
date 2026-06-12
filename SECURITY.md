@@ -10,7 +10,7 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to: security@codepros.dev
+Instead, please report them via email to: <security@codepros.dev>
 
 Please include:
 
@@ -40,9 +40,25 @@ Please include:
 This project implements:
 
 - **Memory Safety**: Zig's compile-time memory safety checks
-- **No Undefined Behavior**: Strict adherence to defined semantics
+- **Safety-Checked Builds**: Debug/ReleaseSafe builds are exercised in CI
+  alongside ReleaseFast/ReleaseSmall; randomness comes from the process
+  CSPRNG (`std.Io` `random`, never silently uninitialized); untrusted
+  envelope parsing is bounds-checked with fuzz coverage
 - **Dependency Scanning**: Automated security scanning in CI
 - **Secret Detection**: Gitleaks scanning for leaked credentials
+
+### Hardening Notes
+
+- **Identifier constraints**: key-derivation identifiers (`tenant`,
+  `schema`, `field`) must be non-empty and must not contain `:` or `/` —
+  violations are rejected with `Error.InvalidIdentifier` so derivation
+  contexts and cache keys stay injective
+- **Master-key format**: `EnvKeyProvider` accepts exactly 32 raw bytes or
+  exactly 64 hex characters; any other length is rejected (no silent
+  truncation of key material)
+- **FEK rotation**: FEKs use random 96-bit AEAD nonces — rotate via
+  `KeyManager.rotateFEK` well before 2^32 encryptions per key (plan for
+  ~2^28); see `docs/KEY_HIERARCHY.md` for the full guidance
 
 ## Security Best Practices
 
