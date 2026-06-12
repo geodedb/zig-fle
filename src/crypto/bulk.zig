@@ -24,8 +24,10 @@ pub const Error = aead.Error;
 
 /// Default number of fields per worker task. See plan Background §3:
 /// AES-NI AES-GCM at GB/s means sub-microsecond per-field submit overhead
-/// dominates unless we chunk.
-pub const default_chunk_size: usize = 4096;
+/// dominates unless we chunk. 2026-06-11 bench: throughput plateaus by
+/// cs=1024 (cs=1024 ≈ cs=4096 within 1%), and the smaller default spreads
+/// tail chunks across more workers for mid-sized batches.
+pub const default_chunk_size: usize = 1024;
 
 /// One field's worth of input for a bulk encrypt call.
 ///
@@ -111,11 +113,16 @@ pub fn encryptFieldsBulk(
         return 0;
     }
 
-    // Serial fallback.
+    // Serial fallback. Arena amortizes per-field AAD allocations exactly
+    // like the chunked path; envelopes still come from `allocator` because
+    // they outlive this call.
     if (pool == null or fields.len == 1) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        const aad_alloc = arena.allocator();
         var ok_count: usize = 0;
         for (fields, 0..) |f, idx| {
-            out_results[idx] = encryptOne(allocator, f);
+            out_results[idx] = encryptOne(aad_alloc, allocator, f);
             if (out_results[idx] == .ok) ok_count += 1;
         }
         observability.endFleSpan(__obs_span, true);
@@ -167,9 +174,7 @@ pub fn encryptFieldsBulk(
     wg.wait();
 
     var ok_count: usize = 0;
-    for (out_results) |r| if (r == .ok) {
-        ok_count += 1;
-    };
+    for (ctxs) |c| ok_count += c.ok_count;
     observability.endFleSpan(__obs_span, true);
     return ok_count;
 }
@@ -177,19 +182,19 @@ pub fn encryptFieldsBulk(
 /// Encrypt a single field. Returns a `BulkResult` so the caller can
 /// write it directly into the output slice without an intermediate
 /// error-union dance.
-fn encryptOne(allocator: std.mem.Allocator, f: BulkField) BulkResult {
+fn encryptOne(aad_allocator: std.mem.Allocator, out_allocator: std.mem.Allocator, f: BulkField) BulkResult {
     const aad = aead.makeAAD(
-        allocator,
+        aad_allocator,
         f.tenant_id,
         f.schema,
         f.field,
         f.record_id,
         f.key_version,
     ) catch |e| return .{ .err = toFleError(e) };
-    defer allocator.free(aad);
+    // No free: aad_allocator is an arena owned by the caller.
 
     const env = aead.encryptField(
-        allocator,
+        out_allocator,
         f.alg,
         f.fek,
         aad,
@@ -217,6 +222,7 @@ const ChunkCtx = struct {
     fields: []const BulkField,
     out_slice: []BulkResult,
     wg: *tp.WaitGroup,
+    ok_count: usize = 0,
 };
 
 fn encryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
@@ -258,21 +264,22 @@ fn encryptChunkInline(c: *ChunkCtx) void {
         };
 
         c.out_slice[idx] = .{ .ok = env };
+        c.ok_count += 1;
     }
 }
 
-fn decryptOne(allocator: std.mem.Allocator, f: BulkDecryptField) BulkDecryptResult {
+fn decryptOne(aad_allocator: std.mem.Allocator, out_allocator: std.mem.Allocator, f: BulkDecryptField) BulkDecryptResult {
     const aad = aead.makeAAD(
-        allocator,
+        aad_allocator,
         f.tenant_id,
         f.schema,
         f.field,
         f.record_id,
         f.key_version,
     ) catch |e| return .{ .err = toFleError(e) };
-    defer allocator.free(aad);
+    // No free: aad_allocator is an arena owned by the caller.
 
-    const pt = aead.decryptField(allocator, f.fek, aad, f.envelope) catch |e| {
+    const pt = aead.decryptField(out_allocator, f.fek, aad, f.envelope) catch |e| {
         return .{ .err = toFleError(e) };
     };
     return .{ .ok = .{ .plaintext = pt } };
@@ -283,6 +290,7 @@ const DecryptChunkCtx = struct {
     fields: []const BulkDecryptField,
     out_slice: []BulkDecryptResult,
     wg: *tp.WaitGroup,
+    ok_count: usize = 0,
 };
 
 fn decryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
@@ -314,6 +322,7 @@ fn decryptChunkInline(c: *DecryptChunkCtx) void {
             continue;
         };
         c.out_slice[idx] = .{ .ok = .{ .plaintext = pt } };
+        c.ok_count += 1;
     }
 }
 
@@ -550,10 +559,16 @@ pub fn decryptFieldsBulk(
         return 0;
     }
 
+    // Serial fallback. Arena amortizes per-field AAD allocations exactly
+    // like the chunked path; plaintexts still come from `allocator` because
+    // they outlive this call.
     if (pool == null or fields.len == 1) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        const aad_alloc = arena.allocator();
         var ok_count: usize = 0;
         for (fields, 0..) |f, idx| {
-            out_results[idx] = decryptOne(allocator, f);
+            out_results[idx] = decryptOne(aad_alloc, allocator, f);
             if (out_results[idx] == .ok) ok_count += 1;
         }
         observability.endFleSpan(__obs_span, true);
@@ -597,9 +612,7 @@ pub fn decryptFieldsBulk(
     wg.wait();
 
     var ok_count: usize = 0;
-    for (out_results) |r| if (r == .ok) {
-        ok_count += 1;
-    };
+    for (ctxs) |c| ok_count += c.ok_count;
     observability.endFleSpan(__obs_span, true);
     return ok_count;
 }
