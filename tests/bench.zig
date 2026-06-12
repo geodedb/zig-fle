@@ -51,9 +51,7 @@ fn runOnce(
 }
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var fek: [32]u8 = undefined;
     std.Io.Threaded.global_single_threaded.io().random(&fek);
@@ -72,6 +70,7 @@ pub fn main() !void {
 
     // Warmup.
     _ = try runOnce(allocator, null, fields, 0);
+    _ = try runOnce(allocator, &pool, fields, 1024); // parallel warmup
 
     const serial_ns = try runOnce(allocator, null, fields, 0);
     std.debug.print("serial:           {d:>10} ns  ({d:.2} M fields/s)\n", .{

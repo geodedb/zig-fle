@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2025 CodePros
 
-.PHONY: all build test test-unit test-integration clean check fmt help dev ci
+.PHONY: all build test test-unit test-integration bench clean check fmt help dev ci
 .PHONY: test-release-safe test-release-fast test-release-small test-all-optimizations
 .PHONY: pre-commit-install pre-commit pre-commit-run
 
@@ -28,6 +28,11 @@ test-unit:
 test-integration:
 	@echo "🔗 Running integration tests..."
 	@zig build test-integration --summary all
+
+# Run micro-benchmarks (full module graph in ReleaseFast)
+bench:
+	@echo "🏎️  Running benchmarks..."
+	@zig build bench -Doptimize=ReleaseFast
 
 # Clean build artifacts
 clean:
@@ -101,6 +106,7 @@ help:
 	@echo "  test-release-fast    Test with ReleaseFast"
 	@echo "  test-release-small   Test with ReleaseSmall"
 	@echo "  test-all-optimizations  Test all optimization levels"
+	@echo "  bench                Run micro-benchmarks (ReleaseFast)"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  fmt                  Format source code"
