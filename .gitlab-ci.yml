@@ -37,6 +37,11 @@ stages:
 
 # Zig installation template (SEC-R6-02: SHA-256 verified via ziglang.org index)
 .install-zig: &install-zig
+  - |
+    if ! echo "$ZIG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+      echo "ERROR: invalid ZIG_VERSION '$ZIG_VERSION'" >&2
+      exit 1
+    fi
   - apt-get update && apt-get install -y curl xz-utils python3
   - |
     if [ ! -f "zig-${ZIG_VERSION}/zig" ]; then

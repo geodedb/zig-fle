@@ -236,6 +236,7 @@ Exposed through `src/root.zig`:
 All gaps are closed. No open gaps remain.
 
 Remaining low-severity items tracked but not blocking:
+
 - Unused error variants (`NonceReuse`, `SearchNotPermitted`, `RotationInProgress`) — forward-declared for future use
 - `KeyManager.wrapKey`/`unwrapKey` lack dedicated test coverage (underlying aead primitives are tested)
 - `EnvKeyProvider` lacks dedicated test coverage (requires env var mocking)
@@ -243,7 +244,7 @@ Remaining low-severity items tracked but not blocking:
 
 ## Test Results
 
-```
+```text
 Unit tests:     29/29 passed
 Integration:     7/7  passed
 Formatting:     clean
