@@ -81,7 +81,7 @@ pub const EnvelopeV1 = struct {
         @memcpy(&tag, data[15..31]);
         const ciphertext_len = std.mem.readInt(u32, data[31..35], .little);
 
-        if (data.len < 35 + ciphertext_len) return Error.InvalidEnvelope;
+        if (ciphertext_len > data.len - 35) return Error.InvalidEnvelope;
 
         const ciphertext = try allocator.alloc(u8, ciphertext_len);
         @memcpy(ciphertext, data[35 .. 35 + ciphertext_len]);
@@ -477,6 +477,62 @@ test "makeAAD length-prefixed format" {
     pos += 2;
 
     try testing.expectEqual(aad.len, pos);
+}
+
+test "deserialize rejects overflow-length envelope without panicking" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Valid 35-byte header, ciphertext_len = 0xFFFFFFFF (overflows 35 + len in u32)
+    var data: [40]u8 = @splat(0);
+    data[0] = 1; // alg_id
+    std.mem.writeInt(u32, data[31..35], 0xFFFF_FFFF, .little);
+    try testing.expectError(Error.InvalidEnvelope, EnvelopeV1.deserialize(allocator, &data));
+}
+
+test "deserialize rejects truncated and boundary-length envelopes" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Shorter than header
+    try testing.expectError(Error.InvalidEnvelope, EnvelopeV1.deserialize(allocator, &[_]u8{0} ** 34));
+
+    // Header claims 5 ciphertext bytes but only 4 present
+    var data: [39]u8 = @splat(0);
+    std.mem.writeInt(u32, data[31..35], 5, .little);
+    try testing.expectError(Error.InvalidEnvelope, EnvelopeV1.deserialize(allocator, &data));
+
+    // Exact boundary: claims 4, has 4 — must succeed
+    var ok_data: [39]u8 = @splat(0);
+    ok_data[0] = 1;
+    std.mem.writeInt(u32, ok_data[31..35], 4, .little);
+    var env = try EnvelopeV1.deserialize(allocator, &ok_data);
+    defer env.deinit(allocator);
+    try testing.expectEqual(@as(usize, 4), env.ciphertext.len);
+}
+
+test "fuzz EnvelopeV1.deserialize never crashes on arbitrary input" {
+    // Adapted to the installed Zig 0.16 fuzz API: testOne receives a
+    // *std.testing.Smith input generator rather than a raw byte slice.
+    const Ctx = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var gpa: std.heap.DebugAllocator(.{}) = .init;
+            defer _ = gpa.deinit();
+            const allocator = gpa.allocator();
+
+            // Arbitrary length (0..256) and arbitrary content; covers
+            // sub-header, boundary, and over-claimed-length inputs.
+            var buf: [256]u8 = undefined;
+            const len = smith.slice(&buf);
+            var env = EnvelopeV1.deserialize(allocator, buf[0..len]) catch return;
+            env.deinit(allocator);
+        }
+    };
+    try std.testing.fuzz(Ctx{}, Ctx.testOne, .{});
 }
 
 test "encryptField produces unique nonces across calls" {
