@@ -68,9 +68,39 @@ pub const StaticKeyProvider = struct {
     };
 };
 
+/// Parse master-key material. Accepted formats (exact, no truncation):
+///   - exactly 32 raw bytes, or
+///   - exactly 64 hex characters (decoded to 32 bytes).
+/// Anything else is rejected — silent truncation of longer values would
+/// quietly reduce effective key entropy.
+pub fn parseKeyMaterial(value: []const u8) MasterKeyProvider.GetKeyError![32]u8 {
+    var key: [32]u8 = undefined;
+    if (value.len == 64) {
+        for (0..32) |i| {
+            const hi = std.fmt.charToDigit(value[i * 2], 16) catch {
+                std.crypto.secureZero(u8, &key);
+                return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
+            };
+            const lo = std.fmt.charToDigit(value[i * 2 + 1], 16) catch {
+                std.crypto.secureZero(u8, &key);
+                return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
+            };
+            key[i] = @as(u8, hi) * 16 + @as(u8, lo);
+        }
+        return key;
+    }
+    if (value.len == 32) {
+        @memcpy(&key, value);
+        return key;
+    }
+    return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
+}
+
 /// A provider that reads the master key from an environment variable.
-/// The env var value must be exactly 32 raw bytes or 64 hex-encoded bytes.
-/// Values shorter than 32 bytes are rejected to prevent weak key material.
+/// The env var value must be EXACTLY 32 raw bytes or EXACTLY 64 hex
+/// characters (decoded to 32 bytes). Any other length — including longer
+/// values that older versions silently truncated — is rejected with
+/// `MasterKeyUnavailable` to prevent weak or entropy-reduced key material.
 pub const EnvKeyProvider = struct {
     allocator: std.mem.Allocator,
     env_var: []const u8,
@@ -97,30 +127,7 @@ pub const EnvKeyProvider = struct {
             self.allocator.free(env_val);
         }
 
-        var key: [32]u8 = undefined;
-
-        if (env_val.len == 64) {
-            // Try hex decoding: 64 hex chars = 32 bytes.
-            // All-or-nothing: if any nibble is invalid, reject entirely.
-            for (0..32) |i| {
-                const hi = std.fmt.charToDigit(env_val[i * 2], 16) catch {
-                    return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
-                };
-                const lo = std.fmt.charToDigit(env_val[i * 2 + 1], 16) catch {
-                    return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
-                };
-                key[i] = @as(u8, hi) * 16 + @as(u8, lo);
-            }
-            return key;
-        }
-
-        if (env_val.len >= 32) {
-            @memcpy(&key, env_val[0..32]);
-            return key;
-        }
-
-        // Reject values shorter than 32 bytes — no SHA-256 fallback
-        return MasterKeyProvider.GetKeyError.MasterKeyUnavailable;
+        return parseKeyMaterial(env_val);
     }
 
     fn deinitFn(_: *anyopaque) void {}
@@ -130,6 +137,33 @@ pub const EnvKeyProvider = struct {
         .deinit = &deinitFn,
     };
 };
+
+test "parseKeyMaterial accepts exactly 32 raw bytes" {
+    const raw = [_]u8{0xAB} ** 32;
+    const key = try parseKeyMaterial(&raw);
+    try std.testing.expectEqualSlices(u8, &raw, &key);
+}
+
+test "parseKeyMaterial accepts exactly 64 hex chars" {
+    const hex = "00112233445566778899aabbccddeeff" ++ "00112233445566778899aabbccddeeff";
+    const key = try parseKeyMaterial(hex);
+    try std.testing.expectEqual(@as(u8, 0x00), key[0]);
+    try std.testing.expectEqual(@as(u8, 0xff), key[15]);
+}
+
+test "parseKeyMaterial rejects truncatable / short / bad-hex values" {
+    const testing = std.testing;
+    const E = MasterKeyProvider.GetKeyError;
+    // 33 raw bytes: previously silently truncated — now rejected.
+    try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(&[_]u8{0xAB} ** 33));
+    // 48 bytes: rejected (neither 32 raw nor 64 hex).
+    try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(&[_]u8{0xAB} ** 48));
+    // 31 bytes: too short.
+    try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(&[_]u8{0xAB} ** 31));
+    // 64 chars with an invalid nibble.
+    const bad_hex = "zz112233445566778899aabbccddeeff" ++ "00112233445566778899aabbccddeeff";
+    try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(bad_hex));
+}
 
 test "StaticKeyProvider round-trip" {
     var key: [32]u8 = undefined;
