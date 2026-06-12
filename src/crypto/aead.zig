@@ -208,58 +208,44 @@ pub fn decryptField(
 
     if (fek.len != 32) return Error.InvalidKey;
 
-    const plaintext = try allocator.alloc(u8, envelope.ciphertext.len);
-
+    // Resolve and validate the algorithm BEFORE allocating: rejecting a
+    // corrupted alg_id must not cost an alloc/free round-trip.
     const alg: Alg = inline for (@typeInfo(Alg).@"enum".fields) |f| {
         if (envelope.alg_id == f.value) break @enumFromInt(f.value);
     } else {
-        std.crypto.secureZero(u8, plaintext);
-        allocator.free(plaintext);
         observability.endFleSpan(__obs_span, false);
         return Error.InvalidAlg;
+    };
+    if (alg == .xchacha20_poly1305) {
+        // XChaCha20 uses 24-byte nonces; not compatible with EnvelopeV1 (12-byte nonce).
+        // Use unwrapKey32 for key unwrapping or the raw primitive directly.
+        observability.endFleSpan(__obs_span, false);
+        return Error.InvalidAlg;
+    }
+
+    const plaintext = try allocator.alloc(u8, envelope.ciphertext.len);
+
+    const fail = struct {
+        fn cleanup(a: std.mem.Allocator, pt: []u8, span: anytype) Error {
+            std.crypto.secureZero(u8, pt);
+            a.free(pt);
+            observability.endFleSpan(span, false);
+            return Error.AEADAuthFailed;
+        }
     };
 
     switch (alg) {
         .aes256_gcm => {
             const AES = std.crypto.aead.aes_gcm.Aes256Gcm;
-            AES.decrypt(
-                plaintext,
-                envelope.ciphertext,
-                envelope.tag,
-                aad,
-                envelope.nonce,
-                fek[0..32].*,
-            ) catch {
-                std.crypto.secureZero(u8, plaintext);
-                allocator.free(plaintext);
-                observability.endFleSpan(__obs_span, false);
-                return Error.AEADAuthFailed;
-            };
+            AES.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch
+                return fail.cleanup(allocator, plaintext, __obs_span);
         },
         .chacha20_poly1305 => {
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
-            ChaCha.decrypt(
-                plaintext,
-                envelope.ciphertext,
-                envelope.tag,
-                aad,
-                envelope.nonce,
-                fek[0..32].*,
-            ) catch {
-                std.crypto.secureZero(u8, plaintext);
-                allocator.free(plaintext);
-                observability.endFleSpan(__obs_span, false);
-                return Error.AEADAuthFailed;
-            };
+            ChaCha.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch
+                return fail.cleanup(allocator, plaintext, __obs_span);
         },
-        .xchacha20_poly1305 => {
-            // XChaCha20 uses 24-byte nonces; not compatible with EnvelopeV1 (12-byte nonce).
-            // Use unwrapKey32 for key unwrapping or the raw primitive directly.
-            std.crypto.secureZero(u8, plaintext);
-            allocator.free(plaintext);
-            observability.endFleSpan(__obs_span, false);
-            return Error.InvalidAlg;
-        },
+        .xchacha20_poly1305 => unreachable, // rejected above
     }
 
     observability.endFleSpan(__obs_span, true);
