@@ -11,7 +11,10 @@ pub const Alg = enum(u8) {
     chacha20_poly1305 = 2,
     xchacha20_poly1305 = 3,
 
-    /// Nonce size in bytes for this algorithm.
+    /// Nonce size in bytes for this algorithm's AEAD primitive.
+    /// NOTE: this describes the primitive itself, not EnvelopeV1 — the
+    /// envelope carries a fixed 12-byte nonce, so the 24-byte value
+    /// reported for `xchacha20_poly1305` never applies to envelopes.
     pub fn nonceSz(self: Alg) usize {
         return switch (self) {
             .aes256_gcm, .chacha20_poly1305 => 12,
@@ -43,6 +46,11 @@ pub const Error = error{
 
 /// Envelope V1 format for encrypted fields
 /// Format: [alg_id:u8][key_version:u16 LE][nonce:12][tag:16][ciphertext_len:u32 LE][ciphertext]
+///
+/// EnvelopeV1 is inherently a 12-byte-nonce format: it supports only
+/// `aes256_gcm` and `chacha20_poly1305`. `xchacha20_poly1305` requires
+/// 24-byte nonces and is rejected by `encryptField`/`decryptField` —
+/// use `wrapKey32`/`unwrapKey32` for XChaCha20-Poly1305 key wrapping.
 pub const EnvelopeV1 = struct {
     alg_id: u8,
     key_version: u16,
@@ -151,6 +159,13 @@ pub fn encryptField(
 
     if (fek.len != 32) return Error.InvalidKey;
     if (plaintext.len > max_plaintext_size) return Error.InvalidInput;
+    if (alg == .xchacha20_poly1305) {
+        // XChaCha20 requires 24-byte nonces; not compatible with EnvelopeV1.
+        // Use wrapKey32 or the raw XChaCha20Poly1305 primitive directly.
+        // Validated BEFORE allocating so rejection costs no alloc/free
+        // round-trip (mirrors decryptField).
+        return Error.InvalidAlg;
+    }
 
     var nonce: [12]u8 = undefined;
     std.Io.Threaded.global_single_threaded.io().random(&nonce);
@@ -169,12 +184,7 @@ pub fn encryptField(
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
             ChaCha.encrypt(ciphertext, &tag, plaintext, aad, nonce, fek[0..32].*);
         },
-        .xchacha20_poly1305 => {
-            // XChaCha20 requires 24-byte nonces; not compatible with EnvelopeV1.
-            // Use wrapKey32 or the raw XChaCha20Poly1305 primitive directly.
-            // errdefer above handles freeing ciphertext on error return.
-            return Error.InvalidAlg;
-        },
+        .xchacha20_poly1305 => unreachable, // rejected before allocation above
     }
 
     observability.endFleSpan(__obs_span, true);
@@ -224,26 +234,38 @@ pub fn decryptField(
     }
 
     const plaintext = try allocator.alloc(u8, envelope.ciphertext.len);
-
-    const fail = struct {
-        fn cleanup(a: std.mem.Allocator, pt: []u8, span: anytype) Error {
-            std.crypto.secureZero(u8, pt);
-            a.free(pt);
-            observability.endFleSpan(span, false);
-            return Error.AEADAuthFailed;
-        }
-    };
+    // Single point of cleanup: ANY error return past this allocation —
+    // including the AEAD auth failures below and any future fallible
+    // step — scrubs and frees the buffer exactly once. Failure paths
+    // below return errors and rely on this; they must NOT free directly.
+    errdefer {
+        std.crypto.secureZero(u8, plaintext);
+        allocator.free(plaintext);
+    }
 
     switch (alg) {
         .aes256_gcm => {
             const AES = std.crypto.aead.aes_gcm.Aes256Gcm;
-            AES.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch
-                return fail.cleanup(allocator, plaintext, __obs_span);
+            AES.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch |err| switch (err) {
+                // std.crypto's AEAD decrypt error set is AuthenticationFailed-only
+                // today; we map it to the generic AEADAuthFailed deliberately so
+                // callers get no decryption-failure oracle.
+                error.AuthenticationFailed => {
+                    observability.endFleSpan(__obs_span, false);
+                    return Error.AEADAuthFailed;
+                },
+            };
         },
         .chacha20_poly1305 => {
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
-            ChaCha.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch
-                return fail.cleanup(allocator, plaintext, __obs_span);
+            ChaCha.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch |err| switch (err) {
+                // Same deliberate mapping as above: AuthenticationFailed-only
+                // error set, collapsed to generic AEADAuthFailed (no oracle).
+                error.AuthenticationFailed => {
+                    observability.endFleSpan(__obs_span, false);
+                    return Error.AEADAuthFailed;
+                },
+            };
         },
         .xchacha20_poly1305 => unreachable, // rejected above
     }

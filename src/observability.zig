@@ -173,6 +173,7 @@ pub fn endFleSpan(span: Span, ok: bool) void {
         // failure variant — see otel/src/api/trace.zig:35.
         span.setStatus(.@"error", "");
     }
+    // Idempotent close: otel Span.end is `ended`-flag-guarded (otel src/api/trace.zig:212-215), so call sites may safely overlap explicit endFleSpan with defer/errdefer closes.
     span.end(null);
 }
 
