@@ -56,7 +56,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const N: usize = 100_000;
     const pt_len: usize = 64; // realistic encrypted-field size

@@ -250,7 +250,7 @@ test "bulk parallel matches serial for identical inputs" {
     }
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const N = 2048;
     const fields = try allocator.alloc(fle.BulkField, N);

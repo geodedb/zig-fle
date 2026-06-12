@@ -330,7 +330,7 @@ test "encryptFieldsBulk serial: round-trip across 3 fields" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const fields = [_]BulkField{
         .{ .fek = &fek, .alg = .aes256_gcm, .tenant_id = "t1", .schema = "Person", .field = "ssn", .record_id = "r1", .key_version = 1, .plaintext = "111-11-1111" },
@@ -358,7 +358,7 @@ test "encryptFieldsBulk serial: partial success — oversized plaintext errors o
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     // Build an intentionally oversized plaintext (> max_plaintext_size).
     const oversized = try allocator.alloc(u8, aead.max_plaintext_size + 1);
@@ -398,7 +398,7 @@ test "encryptFieldsBulk parallel: 10k fields across 4 workers" {
     }
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const N = 10_000;
     const fields = try allocator.alloc(BulkField, N);
@@ -464,7 +464,7 @@ test "decryptFieldsBulk: round-trip 10k envelopes through parallel encrypt + par
     }
 
     var fek: [32]u8 = undefined;
-    _ = std.os.linux.getrandom(@ptrCast(&fek), @sizeOf(@TypeOf(fek)), 0);
+    std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const N = 10_000;
     const enc_fields = try allocator.alloc(BulkField, N);
