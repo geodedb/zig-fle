@@ -81,29 +81,62 @@ pub const BulkOptions = struct {
 };
 
 // ============================================================================
-// Stubs — Task 3 fills in
+// Shared bulk driver
 // ============================================================================
 
-/// Encrypt `fields.len` fields in bulk. `out_results` MUST be the same
-/// length as `fields`. Returns the count of `BulkResult.ok` entries.
+fn BulkCtx(comptime F: type, comptime R: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        fields: []const F,
+        out_slice: []R,
+        wg: *tp.WaitGroup,
+        ok_count: usize = 0,
+    };
+}
+
+/// Shared bulk driver. `runOne(aad_alloc, out_alloc, field) R` performs the
+/// per-field operation; `isOk(R) bool` classifies results.
 ///
-/// Partial-success semantics: an error encrypting one field never fails
-/// the call. Only setup-level allocation failures (e.g. task-context
-/// scratch allocation) bubble up as `error.OutOfMemory`.
-pub fn encryptFieldsBulk(
+/// ONE span per bulk call (not per field) per the otel rollout spec.
+/// Per-field schema names + algorithms live on each field struct and are
+/// intentionally NOT aggregated as attributes here to avoid cardinality
+/// blow-up. SECURITY: per-field `fek`, `plaintext`, ciphertext, tag,
+/// nonce, `aad`, `record_id`, `tenant_id`, `schema`, and `field` are
+/// NEVER attached.
+fn bulkRun(
+    comptime F: type,
+    comptime R: type,
+    comptime span_name: []const u8,
+    comptime runOne: fn (std.mem.Allocator, std.mem.Allocator, F) R,
+    comptime isOk: fn (R) bool,
     allocator: std.mem.Allocator,
     pool: ?*tp.ThreadPool,
-    fields: []const BulkField,
-    out_results: []BulkResult,
+    fields: []const F,
+    out_results: []R,
     options: BulkOptions,
 ) !usize {
-    // ONE span per bulk call (not per field) per the otel rollout
-    // spec. Per-field schema names + algorithms live on each
-    // BulkField and are intentionally NOT aggregated as attributes
-    // here to avoid cardinality blow-up. SECURITY: per-field `fek`,
-    // `plaintext`, `aad`, `record_id`, `tenant_id`, `schema`, and
-    // `field` are NEVER attached.
-    var __obs_span = observability.startFleSpan("bulk_encrypt", "", "");
+    const Ctx = BulkCtx(F, R);
+    const chunkInline = struct {
+        // Arena scoped to this chunk — keeps per-field AAD allocations out
+        // of the global allocator hot path. AAD lifetime: single call.
+        // Outputs (envelopes/plaintexts) outlive the chunk → `c.allocator`.
+        fn run(c: *Ctx) void {
+            var arena = std.heap.ArenaAllocator.init(c.allocator);
+            defer arena.deinit();
+            const aad_alloc = arena.allocator();
+            for (c.fields, 0..) |f, idx| {
+                c.out_slice[idx] = runOne(aad_alloc, c.allocator, f);
+                if (isOk(c.out_slice[idx])) c.ok_count += 1;
+            }
+        }
+        fn task(ctx_: *anyopaque, _: *tp.TaskContext) void {
+            const c: *Ctx = @ptrCast(@alignCast(ctx_));
+            run(c);
+            c.wg.done();
+        }
+    };
+
+    var __obs_span = observability.startFleSpan(span_name, "", "");
     defer __obs_span.end(null);
     errdefer observability.endFleSpan(__obs_span, false);
 
@@ -114,7 +147,7 @@ pub fn encryptFieldsBulk(
     }
 
     // Serial fallback. Arena amortizes per-field AAD allocations exactly
-    // like the chunked path; envelopes still come from `allocator` because
+    // like the chunked path; outputs still come from `allocator` because
     // they outlive this call.
     if (pool == null or fields.len == 1) {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -122,8 +155,8 @@ pub fn encryptFieldsBulk(
         const aad_alloc = arena.allocator();
         var ok_count: usize = 0;
         for (fields, 0..) |f, idx| {
-            out_results[idx] = encryptOne(aad_alloc, allocator, f);
-            if (out_results[idx] == .ok) ok_count += 1;
+            out_results[idx] = runOne(aad_alloc, allocator, f);
+            if (isOk(out_results[idx])) ok_count += 1;
         }
         observability.endFleSpan(__obs_span, true);
         return ok_count;
@@ -133,7 +166,7 @@ pub fn encryptFieldsBulk(
     const p = pool.?;
 
     const n_chunks = (fields.len + chunk_size - 1) / chunk_size;
-    const ctxs = try allocator.alloc(ChunkCtx, n_chunks);
+    const ctxs = try allocator.alloc(Ctx, n_chunks);
     defer allocator.free(ctxs);
 
     var wg = p.waitGroup();
@@ -159,12 +192,12 @@ pub fn encryptFieldsBulk(
     // Submit each chunk. On submit failure, run remaining chunks inline so that
     // partial-success semantics are preserved and wg.done() is always called.
     for (ctxs, 0..) |*c, k| {
-        _ = p.submit(encryptChunk, c, .{
+        _ = p.submit(chunkInline.task, c, .{
             .lane = options.lane,
         }) catch {
             // Run this chunk and all remaining chunks inline.
             for (ctxs[k..]) |*rest| {
-                encryptChunkInline(rest);
+                chunkInline.run(rest);
                 rest.wg.done();
             }
             break;
@@ -177,6 +210,30 @@ pub fn encryptFieldsBulk(
     for (ctxs) |c| ok_count += c.ok_count;
     observability.endFleSpan(__obs_span, true);
     return ok_count;
+}
+
+fn encryptResultOk(r: BulkResult) bool {
+    return r == .ok;
+}
+
+fn decryptResultOk(r: BulkDecryptResult) bool {
+    return r == .ok;
+}
+
+/// Encrypt `fields.len` fields in bulk. `out_results` MUST be the same
+/// length as `fields`. Returns the count of `BulkResult.ok` entries.
+///
+/// Partial-success semantics: an error encrypting one field never fails
+/// the call. Only setup-level allocation failures (e.g. task-context
+/// scratch allocation) bubble up as `error.OutOfMemory`.
+pub fn encryptFieldsBulk(
+    allocator: std.mem.Allocator,
+    pool: ?*tp.ThreadPool,
+    fields: []const BulkField,
+    out_results: []BulkResult,
+    options: BulkOptions,
+) !usize {
+    return bulkRun(BulkField, BulkResult, "bulk_encrypt", encryptOne, encryptResultOk, allocator, pool, fields, out_results, options);
 }
 
 /// Encrypt a single field. Returns a `BulkResult` so the caller can
@@ -217,57 +274,6 @@ fn toFleError(e: anyerror) Error {
     };
 }
 
-const ChunkCtx = struct {
-    allocator: std.mem.Allocator,
-    fields: []const BulkField,
-    out_slice: []BulkResult,
-    wg: *tp.WaitGroup,
-    ok_count: usize = 0,
-};
-
-fn encryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
-    const c: *ChunkCtx = @ptrCast(@alignCast(ctx_));
-    encryptChunkInline(c);
-    c.wg.done();
-}
-
-fn encryptChunkInline(c: *ChunkCtx) void {
-    // Arena scoped to this chunk — keeps per-field AAD allocations out of
-    // the global allocator hot path. AAD lifetime: single encrypt call.
-    var arena = std.heap.ArenaAllocator.init(c.allocator);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
-    for (c.fields, 0..) |f, idx| {
-        const aad_bytes = aead.makeAAD(
-            arena_alloc,
-            f.tenant_id,
-            f.schema,
-            f.field,
-            f.record_id,
-            f.key_version,
-        ) catch |e| {
-            c.out_slice[idx] = .{ .err = toFleError(e) };
-            continue;
-        };
-
-        const env = aead.encryptField(
-            c.allocator, // envelope ciphertext outlives the chunk → global allocator
-            f.alg,
-            f.fek,
-            aad_bytes,
-            f.plaintext,
-            f.key_version,
-        ) catch |e| {
-            c.out_slice[idx] = .{ .err = toFleError(e) };
-            continue;
-        };
-
-        c.out_slice[idx] = .{ .ok = env };
-        c.ok_count += 1;
-    }
-}
-
 fn decryptOne(aad_allocator: std.mem.Allocator, out_allocator: std.mem.Allocator, f: BulkDecryptField) BulkDecryptResult {
     const aad = aead.makeAAD(
         aad_allocator,
@@ -285,45 +291,16 @@ fn decryptOne(aad_allocator: std.mem.Allocator, out_allocator: std.mem.Allocator
     return .{ .ok = .{ .plaintext = pt } };
 }
 
-const DecryptChunkCtx = struct {
+/// Decrypt `fields.len` envelopes in bulk. `out_results` MUST be the
+/// same length as `fields`. Returns the count of `BulkDecryptResult.ok`.
+pub fn decryptFieldsBulk(
     allocator: std.mem.Allocator,
+    pool: ?*tp.ThreadPool,
     fields: []const BulkDecryptField,
-    out_slice: []BulkDecryptResult,
-    wg: *tp.WaitGroup,
-    ok_count: usize = 0,
-};
-
-fn decryptChunk(ctx_: *anyopaque, _: *tp.TaskContext) void {
-    const c: *DecryptChunkCtx = @ptrCast(@alignCast(ctx_));
-    decryptChunkInline(c);
-    c.wg.done();
-}
-
-fn decryptChunkInline(c: *DecryptChunkCtx) void {
-    var arena = std.heap.ArenaAllocator.init(c.allocator);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
-    for (c.fields, 0..) |f, idx| {
-        const aad = aead.makeAAD(
-            arena_alloc,
-            f.tenant_id,
-            f.schema,
-            f.field,
-            f.record_id,
-            f.key_version,
-        ) catch |e| {
-            c.out_slice[idx] = .{ .err = toFleError(e) };
-            continue;
-        };
-
-        const pt = aead.decryptField(c.allocator, f.fek, aad, f.envelope) catch |e| {
-            c.out_slice[idx] = .{ .err = toFleError(e) };
-            continue;
-        };
-        c.out_slice[idx] = .{ .ok = .{ .plaintext = pt } };
-        c.ok_count += 1;
-    }
+    out_results: []BulkDecryptResult,
+    options: BulkOptions,
+) !usize {
+    return bulkRun(BulkDecryptField, BulkDecryptResult, "bulk_decrypt", decryptOne, decryptResultOk, allocator, pool, fields, out_results, options);
 }
 
 // ============================================================================
@@ -534,85 +511,4 @@ test "decryptFieldsBulk: round-trip 10k envelopes through parallel encrypt + par
     try testing.expectEqual(N, ok_dec);
     try testing.expectEqualStrings(pts[42], dec_results[42].ok.plaintext);
     try testing.expectEqualStrings(pts[9876], dec_results[9876].ok.plaintext);
-}
-
-/// Decrypt `fields.len` envelopes in bulk. `out_results` MUST be the
-/// same length as `fields`. Returns the count of `BulkDecryptResult.ok`.
-pub fn decryptFieldsBulk(
-    allocator: std.mem.Allocator,
-    pool: ?*tp.ThreadPool,
-    fields: []const BulkDecryptField,
-    out_results: []BulkDecryptResult,
-    options: BulkOptions,
-) !usize {
-    // ONE span per bulk call (not per field). Same security
-    // invariants as encryptFieldsBulk: per-field `fek`, ciphertext,
-    // tag, nonce, AAD, record_id, tenant_id, schema, and field are
-    // NEVER attached.
-    var __obs_span = observability.startFleSpan("bulk_decrypt", "", "");
-    defer __obs_span.end(null);
-    errdefer observability.endFleSpan(__obs_span, false);
-
-    std.debug.assert(out_results.len == fields.len);
-    if (fields.len == 0) {
-        observability.endFleSpan(__obs_span, true);
-        return 0;
-    }
-
-    // Serial fallback. Arena amortizes per-field AAD allocations exactly
-    // like the chunked path; plaintexts still come from `allocator` because
-    // they outlive this call.
-    if (pool == null or fields.len == 1) {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-        const aad_alloc = arena.allocator();
-        var ok_count: usize = 0;
-        for (fields, 0..) |f, idx| {
-            out_results[idx] = decryptOne(aad_alloc, allocator, f);
-            if (out_results[idx] == .ok) ok_count += 1;
-        }
-        observability.endFleSpan(__obs_span, true);
-        return ok_count;
-    }
-
-    const chunk_size = if (options.chunk_size == 0) default_chunk_size else options.chunk_size;
-    const p = pool.?;
-    const n_chunks = (fields.len + chunk_size - 1) / chunk_size;
-
-    const ctxs = try allocator.alloc(DecryptChunkCtx, n_chunks);
-    defer allocator.free(ctxs);
-
-    var wg = p.waitGroup();
-
-    var i: usize = 0;
-    var ci: usize = 0;
-    while (i < fields.len) : (ci += 1) {
-        const end = @min(i + chunk_size, fields.len);
-        ctxs[ci] = .{
-            .allocator = allocator,
-            .fields = fields[i..end],
-            .out_slice = out_results[i..end],
-            .wg = &wg,
-        };
-        i = end;
-    }
-    wg.add(@intCast(n_chunks));
-
-    for (ctxs, 0..) |*c, k| {
-        _ = p.submit(decryptChunk, c, .{ .lane = options.lane }) catch {
-            // Partial-success: run remaining chunks inline, each manually
-            // decrementing the WaitGroup.
-            for (ctxs[k..]) |*rest| {
-                decryptChunkInline(rest);
-                rest.wg.done();
-            }
-            break;
-        };
-    }
-    wg.wait();
-
-    var ok_count: usize = 0;
-    for (ctxs) |c| ok_count += c.ok_count;
-    observability.endFleSpan(__obs_span, true);
-    return ok_count;
 }
