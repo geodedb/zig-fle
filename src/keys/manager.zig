@@ -12,7 +12,6 @@ pub const Error = error{
     KeyNotFound,
     InvalidKeyVersion,
     InvalidIdentifier,
-    RotationInProgress,
     OutOfMemory,
     MasterKeyRequired,
 };

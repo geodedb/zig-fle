@@ -36,12 +36,10 @@ pub const Alg = enum(u8) {
 pub const Error = error{
     InvalidAlg,
     InvalidKey,
-    NonceReuse,
     AEADAuthFailed,
     InvalidEnvelope,
     InvalidInput,
     OutOfMemory,
-    SearchNotPermitted,
 };
 
 /// Envelope V1 format for encrypted fields

@@ -207,9 +207,7 @@ fn toFleError(e: anyerror) Error {
         error.InvalidInput => Error.InvalidInput,
         error.InvalidEnvelope => Error.InvalidEnvelope,
         error.AEADAuthFailed => Error.AEADAuthFailed,
-        error.NonceReuse => Error.NonceReuse,
         error.OutOfMemory => Error.OutOfMemory,
-        error.SearchNotPermitted => Error.SearchNotPermitted,
         else => Error.InvalidInput, // defensive catch-all
     };
 }
