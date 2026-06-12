@@ -17,6 +17,22 @@ pub const Error = error{
     MasterKeyRequired,
 };
 
+/// Constant AAD for KeyManager.wrapKey/unwrapKey — identical bytes to
+/// aead.makeAAD(alloc, "system", "sys", "key_wrap", "0", 1), computed
+/// at comptime so the hot path never allocates.
+const wrap_key_aad: [4 + 6 + 4 + 3 + 4 + 8 + 4 + 1 + 2]u8 = blk: {
+    var buf: [4 + 6 + 4 + 3 + 4 + 8 + 4 + 1 + 2]u8 = undefined;
+    var pos: usize = 0;
+    for (.{ "system", "sys", "key_wrap", "0" }) |s| {
+        std.mem.writeInt(u32, buf[pos..][0..4], @intCast(s.len), .little);
+        pos += 4;
+        @memcpy(buf[pos .. pos + s.len], s);
+        pos += s.len;
+    }
+    std.mem.writeInt(u16, buf[pos..][0..2], 1, .little);
+    break :blk buf;
+};
+
 /// Key cache entry
 const CacheEntry = struct {
     key: [32]u8,
@@ -308,18 +324,12 @@ pub const KeyManager = struct {
 
     /// Wrap a key (encrypt it) using a wrapping key
     pub fn wrapKey(self: *KeyManager, key_to_wrap: []const u8, wrapping_key: []const u8) !aead.EnvelopeV1 {
-        const aad_data = try aead.makeAAD(self.allocator, "system", "sys", "key_wrap", "0", 1);
-        defer self.allocator.free(aad_data);
-
-        return aead.encryptField(self.allocator, .aes256_gcm, wrapping_key, aad_data, key_to_wrap, 1);
+        return aead.encryptField(self.allocator, .aes256_gcm, wrapping_key, &wrap_key_aad, key_to_wrap, 1);
     }
 
     /// Unwrap a key (decrypt it) using a wrapping key
     pub fn unwrapKey(self: *KeyManager, envelope: aead.EnvelopeV1, wrapping_key: []const u8) ![]u8 {
-        const aad_data = try aead.makeAAD(self.allocator, "system", "sys", "key_wrap", "0", 1);
-        defer self.allocator.free(aad_data);
-
-        return aead.decryptField(self.allocator, wrapping_key, aad_data, envelope);
+        return aead.decryptField(self.allocator, wrapping_key, &wrap_key_aad, envelope);
     }
 
     /// Securely clear all cached keys. Call after key rotation events
@@ -522,6 +532,46 @@ test "cache keys are injective — no cross-identifier collision" {
     const fek1 = try manager.getFEK(.{ .tenant = "ab", .schema = "c", .field = "f", .version = 1 });
     const fek2 = try manager.getFEK(.{ .tenant = "a", .schema = "bc", .field = "f", .version = 1 });
     try testing.expect(!std.mem.eql(u8, &fek1, &fek2));
+}
+
+test "KeyManager wrapKey/unwrapKey round-trip" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var master_key: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    var manager = try KeyManager.init(allocator, master_key);
+    defer manager.deinit();
+
+    var wrapping_key: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&wrapping_key);
+    var key_to_wrap: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&key_to_wrap);
+
+    var envelope = try manager.wrapKey(&key_to_wrap, &wrapping_key);
+    defer envelope.deinit(allocator);
+
+    const unwrapped = try manager.unwrapKey(envelope, &wrapping_key);
+    defer {
+        std.crypto.secureZero(u8, unwrapped);
+        allocator.free(unwrapped);
+    }
+    try testing.expectEqualSlices(u8, &key_to_wrap, unwrapped);
+
+    var wrong_key: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&wrong_key);
+    try testing.expectError(aead.Error.AEADAuthFailed, manager.unwrapKey(envelope, &wrong_key));
+}
+
+test "wrap_key_aad matches makeAAD output" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    const dynamic = try aead.makeAAD(allocator, "system", "sys", "key_wrap", "0", 1);
+    defer allocator.free(dynamic);
+    try std.testing.expectEqualSlices(u8, dynamic, &wrap_key_aad);
 }
 
 test "clearCache forces re-derivation" {
