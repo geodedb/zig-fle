@@ -3,8 +3,8 @@
 
 //! # fle - Field-Level Encryption
 //!
-//! A portable, zero-dependency Zig library for field-level encryption with
-//! searchable blind indices and hierarchical key management.
+//! A portable Zig library for field-level encryption with searchable
+//! blind indices and hierarchical key management.
 //!
 //! ## Features
 //!
@@ -26,6 +26,23 @@
 //! (`encryptFieldsBulk`, `decryptFieldsBulk`) which dispatches per-field
 //! AEAD work across a caller-provided `thread_pool.ThreadPool` with
 //! partial-success error semantics.
+//!
+//! The allocator passed to `encryptFieldsBulk`/`decryptFieldsBulk` MUST be
+//! thread-safe when a pool is supplied — worker chunks allocate from it
+//! concurrently. (`std.heap.smp_allocator`, `std.heap.page_allocator`, and
+//! the default-config DebugAllocator are thread-safe; a bare
+//! `ArenaAllocator` is not.)
+//!
+//! ## Key Lifetime & Rotation
+//!
+//! - FEKs use random 96-bit AEAD nonces. Per NIST SP 800-38D, rotate a FEK
+//!   (via `KeyManager.rotateFEK`) well before 2^32 encryptions under the
+//!   same key; plan rotation at or below ~2^28 encryptions per field-version
+//!   for margin.
+//! - The KeyManager FEK/BIK caches are unbounded and hold derived keys in
+//!   process memory for the manager's lifetime. Call `clearCache()` after
+//!   rotation events or on a residency schedule; `deinit` zeroizes all
+//!   cached key material.
 //!
 //! ## Quick Start
 //!
@@ -90,16 +107,16 @@ pub const annotations = @import("schema/annotations.zig");
 /// Bulk encrypt/decrypt entry points (requires `thread_pool`).
 pub const bulk = @import("crypto/bulk.zig");
 
-// otel observability seam. Surfaces `startFleSpan` / `endFleSpan` plus
-// the `enabled` flag. When `-Dwith_otel=false` (the default), every
-// helper collapses to a comptime no-op and the otel dependency is
-// never resolved. The public API is reachable as `fle.observability`.
+/// otel observability seam. Surfaces `startFleSpan` / `endFleSpan` plus
+/// the `enabled` flag. When `-Dwith_otel=false` (the default), every
+/// helper collapses to a comptime no-op and the otel dependency is
+/// never resolved. The public API is reachable as `fle.observability`.
 pub const observability = @import("observability");
 
-// Bootstrap helper for the enabled build. Only registered as a build
-// import when `-Dwith_otel=true`; under the disabled build the
-// reference resolves to a placeholder empty struct so the public root
-// stays uniform.
+/// Bootstrap helper for the enabled build. Only registered as a build
+/// import when `-Dwith_otel=true`; under the disabled build the
+/// reference resolves to a placeholder empty struct so the public root
+/// stays uniform.
 pub const observability_init = if (observability.enabled)
     @import("observability_init")
 else
@@ -109,28 +126,51 @@ else
 // Convenience aliases for the most common public types
 // ============================================================================
 
+/// AEAD algorithm selector (AES-256-GCM, ChaCha20-Poly1305, XChaCha20-Poly1305 for key wrap).
 pub const Alg = aead.Alg;
+/// Serialized encrypted-field envelope (alg, key version, nonce, tag, ciphertext).
 pub const EnvelopeV1 = aead.EnvelopeV1;
+/// Wrap a 32-byte key with XChaCha20-Poly1305 (stack-only, no allocator).
 pub const wrapKey32 = aead.wrapKey32;
+/// Unwrap a 32-byte key previously wrapped with `wrapKey32`.
 pub const unwrapKey32 = aead.unwrapKey32;
+/// RFC 5869 HKDF-SHA256 (arbitrary output length).
 pub const hkdfSha256 = hkdf.hkdfSha256;
+/// Derive a single 32-byte key via HKDF-SHA256.
 pub const deriveKey32 = hkdf.deriveKey32;
+/// Hierarchical key manager: master -> TRK -> SK -> FEK/BIK, with caching and rotation.
 pub const KeyManager = key_manager.KeyManager;
+/// Identifier tuple (tenant/schema/field/version) for key derivation. Identifiers must not contain ':' or '/'.
 pub const KeyIds = key_types.KeyIds;
+/// In-memory searchable blind index: HMAC(BIK, normalize(value)) -> record IDs.
 pub const BlindIndex = blind_index.BlindIndex;
+/// 32-byte blind-index token (full-width HMAC-SHA256 output).
 pub const BlindIndexToken = blind_index.BlindIndexToken;
+/// Pluggable master-key source vtable interface.
 pub const MasterKeyProvider = key_provider.MasterKeyProvider;
+/// MasterKeyProvider backed by a static in-memory key (tests, pre-sourced keys).
 pub const StaticKeyProvider = key_provider.StaticKeyProvider;
+/// MasterKeyProvider reading exactly 32 raw bytes or 64 hex chars from an env var.
 pub const EnvKeyProvider = key_provider.EnvKeyProvider;
+/// Parser for `@encrypted`/`@searchable`/`@visible`/`@classify` schema annotations.
 pub const AnnotationParser = annotations.AnnotationParser;
+/// Per-field encryption/search/visibility/classification metadata produced by annotation parsing.
 pub const FieldMetadata = annotations.FieldMetadata;
+/// Per-type field-name -> `FieldMetadata` map produced by annotation parsing.
 pub const TypeMetadata = annotations.TypeMetadata;
+/// One field's input for `encryptFieldsBulk`.
 pub const BulkField = bulk.BulkField;
+/// One field's input for `decryptFieldsBulk`.
 pub const BulkDecryptField = bulk.BulkDecryptField;
+/// Per-field bulk encrypt result (owned envelope or error).
 pub const BulkResult = bulk.BulkResult;
+/// Per-field bulk decrypt result (owned plaintext or error).
 pub const BulkDecryptResult = bulk.BulkDecryptResult;
+/// Tunables (chunk size, task lane) for bulk calls.
 pub const BulkOptions = bulk.BulkOptions;
+/// Encrypt many fields, optionally fanned out across a thread pool. Requires a thread-safe allocator when pooled.
 pub const encryptFieldsBulk = bulk.encryptFieldsBulk;
+/// Decrypt many envelopes, optionally fanned out across a thread pool. Requires a thread-safe allocator when pooled.
 pub const decryptFieldsBulk = bulk.decryptFieldsBulk;
 
 // ============================================================================

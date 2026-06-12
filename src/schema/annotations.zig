@@ -267,7 +267,15 @@ pub const AnnotationParser = struct {
     }
 };
 
-/// Apply annotations to a field and update metadata
+/// Parse `annotations_text` (e.g. `@encrypted(alg:"AES-256-GCM") @searchable(...)`)
+/// and insert the resulting `FieldMetadata` into `type_meta.fields` under
+/// `field_name` (replacing any existing entry for that field). `allocator` is
+/// used for transient parser state and for the role/tag arrays retained by
+/// `@visible`/`@classify` metadata (freed by `TypeMetadata.deinit`). Returns
+/// parser errors (`ExpectedIdentifier`, `ExpectedString`, `ExpectedColon`,
+/// ...), value errors (`InvalidAlgorithm`, `InvalidKeyScope`,
+/// `InvalidIndexType`, integer-parse errors for `rotate`), or `OutOfMemory`.
+/// Unknown annotation names are ignored.
 pub fn applyAnnotations(
     allocator: std.mem.Allocator,
     type_meta: *TypeMetadata,

@@ -11,6 +11,12 @@
 //!
 //! Callers that do not want a pool may pass `pool = null`; the batch
 //! then runs serially in the caller thread.
+//!
+//! The allocator passed to `encryptFieldsBulk`/`decryptFieldsBulk` MUST be
+//! thread-safe when a pool is supplied — worker chunks allocate from it
+//! concurrently. (`std.heap.smp_allocator`, `std.heap.page_allocator`, and
+//! the default-config DebugAllocator are thread-safe; a bare
+//! `ArenaAllocator` is not.)
 
 const std = @import("std");
 const tp = @import("thread_pool");

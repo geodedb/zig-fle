@@ -38,7 +38,9 @@ const CacheEntry = struct {
     version: u16,
 };
 
-/// Key cache for performance
+/// Key cache for performance.
+/// Unbounded: entries persist until `clearCache`/`deinit`. See root.zig
+/// "Key Lifetime & Rotation" for residency guidance.
 const KeyCache = struct {
     map: std.StringHashMap(CacheEntry),
     hits: u64 = 0,
