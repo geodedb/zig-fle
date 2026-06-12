@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   direct test coverage
 - Bench methodology: ReleaseFast module graph, SMP allocator, parallel
   warmup (B1-B3)
+- `minimum_zig_version` raised from 0.15.1 to 0.16.0 — the library depends
+  on 0.16-era APIs (`std.Io.Threaded`, `std.Io.Mutex`) and does not compile
+  on 0.15.1 (CI-001)
 
 ### Added
 
