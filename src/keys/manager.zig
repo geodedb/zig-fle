@@ -54,8 +54,16 @@ const KeyCache = struct {
         return null;
     }
 
-    pub fn put(self: *KeyCache, key: []const u8, entry: CacheEntry) !void {
-        try self.map.put(key, entry);
+    /// Insert a derived key. Takes ownership of `key` (an allocation from
+    /// the map's allocator). If the entry already exists, the NEW key string
+    /// is freed and the value is updated in place — the map keeps its
+    /// original owned key, so no allocation is leaked.
+    pub fn put(self: *KeyCache, key: []u8, entry: CacheEntry) !void {
+        const gop = try self.map.getOrPut(key);
+        if (gop.found_existing) {
+            self.map.allocator.free(key);
+        }
+        gop.value_ptr.* = entry;
     }
 
     /// Securely zero all cached keys and free owned key strings, then clear.
@@ -278,7 +286,8 @@ pub const KeyManager = struct {
 
         const current_version = self.getKeyVersion(key_path);
         if (current_version == std.math.maxInt(u16)) {
-            observability.endFleSpan(__obs_span, false);
+            // The function-level errdefer ends the span as failed on this
+            // error return; an explicit endFleSpan here would be redundant.
             return Error.InvalidKeyVersion;
         }
         const new_version = current_version + 1;

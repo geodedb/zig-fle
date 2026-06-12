@@ -101,8 +101,11 @@ pub const BlindIndex = struct {
         }
 
         const owned_id = try self.allocator.dupe(u8, record_id);
-        errdefer self.allocator.free(owned_id);
-        try token_gop.value_ptr.append(self.allocator, owned_id);
+        token_gop.value_ptr.append(self.allocator, owned_id) catch |err| {
+            self.allocator.free(owned_id);
+            if (!token_gop.found_existing) _ = token_map.remove(token);
+            return err;
+        };
     }
 
     /// Lookup record IDs matching a plaintext value.
