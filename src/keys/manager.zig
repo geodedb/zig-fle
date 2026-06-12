@@ -11,6 +11,7 @@ const observability = @import("observability");
 pub const Error = error{
     KeyNotFound,
     InvalidKeyVersion,
+    InvalidIdentifier,
     RotationInProgress,
     OutOfMemory,
     MasterKeyRequired,
@@ -74,6 +75,10 @@ const KeyCache = struct {
 ///
 /// The master key is injected at initialization rather than read from environment
 /// variables, allowing callers to source it from any key management system.
+///
+/// Identifiers (`tenant`, `schema`, `field`) must be non-empty and must not
+/// contain `:` or `/` — these are reserved as derivation-context delimiters;
+/// violations return `Error.InvalidIdentifier`.
 pub const KeyManager = struct {
     allocator: std.mem.Allocator,
     master_key: [32]u8,
@@ -124,66 +129,114 @@ pub const KeyManager = struct {
         return self.key_versions.get(key_path) orelse 1;
     }
 
-    /// Build cache key for FEK/BIK lookup
+    /// Reserved characters in identifiers: ':' and '/' are delimiters in
+    /// HKDF derivation contexts and rotation key-paths. Rejecting them at
+    /// the API boundary keeps every downstream encoding injective without
+    /// changing the (compatibility-locked) HKDF context format.
+    fn validateIdentifier(s: []const u8) Error!void {
+        if (s.len == 0) return Error.InvalidIdentifier;
+        for (s) |c| {
+            if (c == ':' or c == '/') return Error.InvalidIdentifier;
+        }
+    }
+
+    fn validateIds(ids: types.KeyIds) Error!void {
+        try validateIdentifier(ids.tenant);
+        try validateIdentifier(ids.schema);
+        try validateIdentifier(ids.field);
+    }
+
+    /// Build an injective (length-prefixed) cache key for FEK/BIK lookup.
+    /// Layout: [len:u32 LE][tenant][len:u32 LE][schema][len:u32 LE][field][version:u16 LE]
     fn buildCacheKey(allocator: std.mem.Allocator, ids: types.KeyIds) ![]u8 {
-        return std.fmt.allocPrint(allocator, "{s}:{s}:{s}:v{d}", .{
-            ids.tenant,
-            ids.schema,
-            ids.field,
-            ids.version,
-        });
+        const total = 4 + ids.tenant.len + 4 + ids.schema.len + 4 + ids.field.len + 2;
+        const key = try allocator.alloc(u8, total);
+        var pos: usize = 0;
+        inline for (.{ ids.tenant, ids.schema, ids.field }) |s| {
+            std.mem.writeInt(u32, key[pos..][0..4], @intCast(s.len), .little);
+            pos += 4;
+            @memcpy(key[pos .. pos + s.len], s);
+            pos += s.len;
+        }
+        std.mem.writeInt(u16, key[pos..][0..2], ids.version, .little);
+        return key;
+    }
+
+    /// Stack-buffer variant for the hot cache-hit path: writes the same
+    /// injective encoding into `buf` and returns the used slice, or null
+    /// if the identifiers exceed the buffer (caller falls back to heap).
+    fn buildCacheKeyBuf(buf: []u8, ids: types.KeyIds) ?[]const u8 {
+        const total = 4 + ids.tenant.len + 4 + ids.schema.len + 4 + ids.field.len + 2;
+        if (total > buf.len) return null;
+        var pos: usize = 0;
+        inline for (.{ ids.tenant, ids.schema, ids.field }) |s| {
+            std.mem.writeInt(u32, buf[pos..][0..4], @intCast(s.len), .little);
+            pos += 4;
+            @memcpy(buf[pos .. pos + s.len], s);
+            pos += s.len;
+        }
+        std.mem.writeInt(u16, buf[pos..][0..2], ids.version, .little);
+        return buf[0..total];
     }
 
     /// Get Field Encryption Key (FEK).
     /// Derives TRK -> SK -> FEK using HKDF.
     pub fn getFEK(self: *KeyManager, ids: types.KeyIds) ![32]u8 {
-        const cache_key = try buildCacheKey(self.allocator, ids);
-        errdefer self.allocator.free(cache_key);
+        try validateIds(ids);
 
-        if (self.fek_cache.get(cache_key)) |entry| {
-            self.allocator.free(cache_key);
-            return entry.key;
+        var key_buf: [256]u8 = undefined;
+        const stack_key = buildCacheKeyBuf(&key_buf, ids);
+        if (stack_key) |sk_key| {
+            if (self.fek_cache.get(sk_key)) |entry| return entry.key;
         }
 
         var trk = try hkdf.deriveTRK(&self.master_key, ids.tenant);
         defer std.crypto.secureZero(u8, &trk);
-
         var sk = try hkdf.deriveSK(&trk, ids.schema);
         defer std.crypto.secureZero(u8, &sk);
-
         const fek = try hkdf.deriveFEKVersioned(&sk, ids.field, ids.version);
 
-        try self.fek_cache.put(cache_key, .{
-            .key = fek,
-            .version = ids.version,
-        });
-
+        const cache_key = try buildCacheKey(self.allocator, ids);
+        errdefer self.allocator.free(cache_key);
+        if (stack_key == null) {
+            // Identifiers too long for the stack buffer — check the heap key
+            // before inserting to avoid duplicate-key leaks.
+            if (self.fek_cache.get(cache_key)) |entry| {
+                self.allocator.free(cache_key);
+                return entry.key;
+            }
+        }
+        try self.fek_cache.put(cache_key, .{ .key = fek, .version = ids.version });
         return fek;
     }
 
     /// Get Blind Index Key (BIK)
     pub fn getBIK(self: *KeyManager, ids: types.KeyIds) ![32]u8 {
-        const cache_key = try buildCacheKey(self.allocator, ids);
-        errdefer self.allocator.free(cache_key);
+        try validateIds(ids);
 
-        if (self.bik_cache.get(cache_key)) |entry| {
-            self.allocator.free(cache_key);
-            return entry.key;
+        var key_buf: [256]u8 = undefined;
+        const stack_key = buildCacheKeyBuf(&key_buf, ids);
+        if (stack_key) |sk_key| {
+            if (self.bik_cache.get(sk_key)) |entry| return entry.key;
         }
 
         var trk = try hkdf.deriveTRK(&self.master_key, ids.tenant);
         defer std.crypto.secureZero(u8, &trk);
-
         var sk = try hkdf.deriveSK(&trk, ids.schema);
         defer std.crypto.secureZero(u8, &sk);
-
         const bik = try hkdf.deriveBIKVersioned(&sk, ids.field, ids.version);
 
-        try self.bik_cache.put(cache_key, .{
-            .key = bik,
-            .version = ids.version,
-        });
-
+        const cache_key = try buildCacheKey(self.allocator, ids);
+        errdefer self.allocator.free(cache_key);
+        if (stack_key == null) {
+            // Identifiers too long for the stack buffer — check the heap key
+            // before inserting to avoid duplicate-key leaks.
+            if (self.bik_cache.get(cache_key)) |entry| {
+                self.allocator.free(cache_key);
+                return entry.key;
+            }
+        }
+        try self.bik_cache.put(cache_key, .{ .key = bik, .version = ids.version });
         return bik;
     }
 
@@ -206,11 +259,21 @@ pub const KeyManager = struct {
         defer __obs_span.end(null);
         errdefer observability.endFleSpan(__obs_span, false);
 
-        const key_path = try std.fmt.allocPrint(self.allocator, "{s}:{s}:{s}", .{
-            tenant,
-            schema,
-            field,
-        });
+        try validateIdentifier(tenant);
+        try validateIdentifier(schema);
+        try validateIdentifier(field);
+
+        const total = 4 + tenant.len + 4 + schema.len + 4 + field.len;
+        const key_path = try self.allocator.alloc(u8, total);
+        {
+            var pos: usize = 0;
+            inline for (.{ tenant, schema, field }) |s| {
+                std.mem.writeInt(u32, key_path[pos..][0..4], @intCast(s.len), .little);
+                pos += 4;
+                @memcpy(key_path[pos .. pos + s.len], s);
+                pos += s.len;
+            }
+        }
         errdefer self.allocator.free(key_path);
 
         const current_version = self.getKeyVersion(key_path);
@@ -412,6 +475,44 @@ test "rotateFEK version persists across multiple rotations" {
 
     const v4 = try manager.rotateFEK("t1", "Person", "ssn");
     try testing.expectEqual(@as(u16, 4), v4);
+}
+
+test "getFEK rejects identifiers containing reserved delimiters" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var master_key: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    var manager = try KeyManager.init(allocator, master_key);
+    defer manager.deinit();
+
+    // ':' and '/' are reserved (HKDF context + cache delimiters); empty is invalid.
+    try testing.expectError(Error.InvalidIdentifier, manager.getFEK(.{ .tenant = "a:b", .schema = "s", .field = "f", .version = 1 }));
+    try testing.expectError(Error.InvalidIdentifier, manager.getFEK(.{ .tenant = "a", .schema = "s/x", .field = "f", .version = 1 }));
+    try testing.expectError(Error.InvalidIdentifier, manager.getFEK(.{ .tenant = "a", .schema = "s", .field = "", .version = 1 }));
+    try testing.expectError(Error.InvalidIdentifier, manager.getBIK(.{ .tenant = "a:b", .schema = "s", .field = "f", .version = 1 }));
+    try testing.expectError(Error.InvalidIdentifier, manager.rotateFEK("a:b", "s", "f"));
+}
+
+test "cache keys are injective — no cross-identifier collision" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var master_key: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    var manager = try KeyManager.init(allocator, master_key);
+    defer manager.deinit();
+
+    // Same concatenation under the old ':' scheme, different identities.
+    // "ab"+"c" vs "a"+"bc" — distinct tenants MUST get distinct FEKs even
+    // when one primes the cache first.
+    const fek1 = try manager.getFEK(.{ .tenant = "ab", .schema = "c", .field = "f", .version = 1 });
+    const fek2 = try manager.getFEK(.{ .tenant = "a", .schema = "bc", .field = "f", .version = 1 });
+    try testing.expect(!std.mem.eql(u8, &fek1, &fek2));
 }
 
 test "clearCache forces re-derivation" {

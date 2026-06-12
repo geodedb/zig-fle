@@ -37,7 +37,16 @@ pub const BlindIndex = struct {
     }
 
     fn buildFieldKey(allocator: std.mem.Allocator, schema: []const u8, field: []const u8) ![]u8 {
-        return std.fmt.allocPrint(allocator, "{s}.{s}", .{ schema, field });
+        const total = 4 + schema.len + 4 + field.len;
+        const key = try allocator.alloc(u8, total);
+        var pos: usize = 0;
+        inline for (.{ schema, field }) |s| {
+            std.mem.writeInt(u32, key[pos..][0..4], @intCast(s.len), .little);
+            pos += 4;
+            @memcpy(key[pos .. pos + s.len], s);
+            pos += s.len;
+        }
+        return key;
     }
 
     /// Add or update blind index entry for a field value
@@ -193,6 +202,23 @@ test "BlindIndex normalization handles case and whitespace" {
     try testing.expect(results != null);
     try testing.expectEqual(@as(usize, 1), results.?.len);
     try testing.expectEqualStrings("person1", results.?[0]);
+}
+
+test "BlindIndex field keys are injective across schema/field boundaries" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var index = BlindIndex.init(allocator);
+    defer index.deinit();
+    var bik: [32]u8 = undefined;
+    std.Io.Threaded.global_single_threaded.io().random(&bik);
+
+    try index.put("a.b", "c", bik, "v", "r1");
+    // Different identity, same '.'-joined string under the old scheme.
+    const results = try index.lookup("a", "b.c", bik, "v");
+    try testing.expect(results == null);
 }
 
 test "BlindIndex remove" {
