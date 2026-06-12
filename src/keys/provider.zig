@@ -163,6 +163,8 @@ test "parseKeyMaterial rejects truncatable / short / bad-hex values" {
     // 64 chars with an invalid nibble.
     const bad_hex = "zz112233445566778899aabbccddeeff" ++ "00112233445566778899aabbccddeeff";
     try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(bad_hex));
+    // >64 bytes: also rejected (not a valid 64-hex string, no truncation).
+    try testing.expectError(E.MasterKeyUnavailable, parseKeyMaterial(&[_]u8{0xAB} ** 65));
 }
 
 test "StaticKeyProvider round-trip" {
