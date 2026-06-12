@@ -1,6 +1,6 @@
 # GAP Analysis - Resolved Items
 
-Last updated: 2026-03-23
+Last updated: 2026-06-11
 
 ## Closed Gaps
 
@@ -139,6 +139,34 @@ Last updated: 2026-03-23
 - **Evidence**: `KeyManager` and `BlindIndex` use unsynchronized `StringHashMap` with no documentation about thread safety constraints
 - **Resolution**: Added Thread Safety section to `root.zig` module doc comment. States that `KeyManager` and `BlindIndex` are NOT thread-safe and require external synchronization. Stateless functions are safe for concurrent use.
 - **Files changed**: `src/root.zig`
+
+## Low-Severity Items Resolved (2026-06-11 audit remediation)
+
+The four low-severity items previously listed in `docs/GAP_ANALYSIS.md` under "Open Gap Summary" were resolved on 2026-06-11:
+
+### Unused error variants removed (Resolved 2026-06-11)
+
+- **Item**: `NonceReuse`, `SearchNotPermitted`, `RotationInProgress` were forward-declared but never raised anywhere.
+- **Resolution**: All three dead error variants removed (DC-001..003).
+- **Commit**: `98dd8af` — `refactor: remove never-raised error variants NonceReuse/SearchNotPermitted/RotationInProgress (DC-001..003)`
+
+### KeyManager.wrapKey/unwrapKey test coverage added (Resolved 2026-06-11)
+
+- **Item**: `KeyManager.wrapKey`/`unwrapKey` lacked dedicated test coverage (only the underlying aead primitives were tested).
+- **Resolution**: Dedicated wrapKey/unwrapKey tests added, plus comptime wrap AAD constant (Z1).
+- **Commit**: `40e0655` — `test(keys): wrapKey/unwrapKey coverage; comptime wrap AAD constant (Z1)`
+
+### EnvKeyProvider test coverage added (Resolved 2026-06-11)
+
+- **Item**: `EnvKeyProvider` lacked dedicated test coverage (required env var mocking).
+- **Resolution**: Strict key-format validation, partial-key zeroization on error, and dedicated tests added as part of the FLE-013 fix.
+- **Commit**: `74625b7` — `fix(keys): strict EnvKeyProvider key format, zeroize partial key on error, add tests (FLE-013)`
+
+### Stale README Quick Start fixed (Resolved 2026-06-11)
+
+- **Item**: README Quick Start example was stale (the correct example lived only in the `root.zig` doc comment).
+- **Resolution**: README Quick Start rewritten against the current API, alongside the key-hierarchy guide and out-of-scope section.
+- **Commit**: `95d077b` — `docs: key hierarchy guide, fixed README quick start, out-of-scope, real changelog, owners (#23, #26)`
 
 ## Updated Test Totals
 

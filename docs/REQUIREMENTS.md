@@ -1,6 +1,6 @@
 # Requirements
 
-Last updated: 2026-03-21
+Last updated: 2026-06-11
 
 ## Functional Requirements
 
@@ -14,6 +14,8 @@ Last updated: 2026-03-21
 | FLE-REQ-006 | The library SHALL expose blind-index storage/lookups. | `src/index/blind_index.zig:24`, `:61`, `:106`, `:135` |
 | FLE-REQ-007 | The library SHALL expose schema annotation parsing and metadata application. | `src/schema/annotations.zig:129`, `:220`, `:269` |
 | FLE-REQ-008 | The library SHALL NOT own Geode’s global file-backed catalog in the initial extraction. | `src/schema/fle_catalog.zig:339`, `:344`, `:378`, `:463` |
+| FLE-REQ-009 | The library SHALL expose a bulk encrypt/decrypt API with optional thread-pool parallelism and a serial fallback. | devnw/zig/fle#34; implemented in `src/crypto/bulk.zig` (`encryptFieldsBulk`, `decryptFieldsBulk`) |
+| FLE-REQ-010 | The library SHALL expose an OpenTelemetry observability seam that is a comptime no-op by default and never carries key material, plaintext, or ciphertext in telemetry attributes. | devnw/zig/fle#35; implemented in `src/observability.zig`, `src/observability_init.zig` (gated by `-Dwith_otel`) |
 
 ## Packaging Requirements
 

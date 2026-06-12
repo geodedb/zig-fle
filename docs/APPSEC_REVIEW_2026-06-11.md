@@ -39,22 +39,22 @@ Frameworks: OWASP Top 10:2025, CIS Controls v8.1.2 (adapted for a cryptographic 
 
 ## 3. Findings Table
 
-| ID | Title | Severity | Location | OWASP 2025 / CIS v8.1.2 |
-|----|-------|----------|----------|--------------------------|
-| FLE-001 | `getrandom` return value discarded → uninitialized/reused AEAD nonce | High | `src/crypto/aead.zig:155`, `:283` | A04 Crypto Failures, A10 Exceptional Conditions / CIS 3, 16.11 |
-| FLE-002 | Integer overflow in untrusted envelope length check → DoS/OOB | Medium | `src/crypto/aead.zig:82-87` | A10 Exceptional Conditions, A05 Injection / CIS 16.11 |
-| FLE-003 | Ambiguous delimiter encoding → cross-tenant/field key confusion | Medium | `src/keys/manager.zig:128-135`, `:209-213`; `src/crypto/hkdf.zig:86-124` | A01 Broken Access Control, A04 / CIS 3, 16 |
-| FLE-004 | Gitleaks allowlists all `.zig` files → secret scanner blind | Medium | `.gitleaks.toml:9-18` | A03 Supply Chain, A02 Misconfig / CIS 16.12, 3.11 |
-| FLE-005 | Random 96-bit nonce + long-lived shared FEK → birthday-bound reuse at scale | Low | `src/crypto/aead.zig:154-169`, `:36` | A04 Crypto Failures, A06 Insecure Design / CIS 3 |
-| FLE-006 | Blind-index normalized plaintext not zeroized before free | Low | `src/index/blind_index.zig:55-56`, `:109-110`; `src/crypto/hmac.zig:16-38` | A04 Crypto Failures / CIS 3.11 |
-| FLE-007 | Unbounded key cache (no eviction/TTL) → memory growth + key residency | Low | `src/keys/manager.zig:26-58`, `:139-188` | A04, A06 / CIS 3 |
-| FLE-008 | `BlindIndex.lookup` returns borrowed internal slice → dangling/UAF footgun | Low | `src/index/blind_index.zig:97-120` | A06 Insecure Design / CIS 16 |
-| FLE-009 | Bulk path needs a thread-safe backing allocator, not documented/enforced | Low | `src/crypto/bulk.zig:230-263`, `:296-320` | A06 Insecure Design / CIS 16 |
-| FLE-010 | Dependency pin ref/hash mismatch; CI compiler ≠ declared minimum | Low | `build.zig.zon:11-14`; `.gitlab-ci.yml:27` | A08 Integrity, A03 Supply Chain / CIS 2, 16.4 |
-| FLE-011 | Custom HKDF reimplementation; only 1 of 7 RFC 5869 vectors tested | Low/Info | `src/crypto/hkdf.zig:21-67`, `:127-144` | A04 / CIS 16.1 vetted modules |
-| FLE-012 | "Portable" claim vs Linux-only RNG syscall | Info | `src/root.zig:5-6`; `src/crypto/aead.zig:155` | A06 / CIS 16 |
-| FLE-013 | `EnvKeyProvider` key-format edge cases (silent truncation, 64-byte raw rejected, partial key not zeroized) | Info/Low | `src/keys/provider.zig:100-124` | A04, A07 / CIS 3 |
-| FLE-014 | `KeyManager` not thread-safe (documented) but mutated counters | Info | `src/root.zig:17-24`; `src/keys/manager.zig:47-58` | A06 / CIS 16 |
+| ID | Title | Severity | Location | OWASP 2025 / CIS v8.1.2 | Status |
+|----|-------|----------|----------|--------------------------|--------|
+| FLE-001 | `getrandom` return value discarded → uninitialized/reused AEAD nonce | High | `src/crypto/aead.zig:155`, `:283` | A04 Crypto Failures, A10 Exceptional Conditions / CIS 3, 16.11 | Resolved `4770444` |
+| FLE-002 | Integer overflow in untrusted envelope length check → DoS/OOB | Medium | `src/crypto/aead.zig:82-87` | A10 Exceptional Conditions, A05 Injection / CIS 16.11 | Resolved `8838d33` |
+| FLE-003 | Ambiguous delimiter encoding → cross-tenant/field key confusion | Medium | `src/keys/manager.zig:128-135`, `:209-213`; `src/crypto/hkdf.zig:86-124` | A01 Broken Access Control, A04 / CIS 3, 16 | Resolved `dfc3634` |
+| FLE-004 | Gitleaks allowlists all `.zig` files → secret scanner blind | Medium | `.gitleaks.toml:9-18` | A03 Supply Chain, A02 Misconfig / CIS 16.12, 3.11 | Resolved `bcfaa5f` |
+| FLE-005 | Random 96-bit nonce + long-lived shared FEK → birthday-bound reuse at scale | Low | `src/crypto/aead.zig:154-169`, `:36` | A04 Crypto Failures, A06 Insecure Design / CIS 3 | Mitigated-by-docs `7edbd8e` (rotation threshold documented) |
+| FLE-006 | Blind-index normalized plaintext not zeroized before free | Low | `src/index/blind_index.zig:55-56`, `:109-110`; `src/crypto/hmac.zig:16-38` | A04 Crypto Failures / CIS 3.11 | Resolved `0f49b10` |
+| FLE-007 | Unbounded key cache (no eviction/TTL) → memory growth + key residency | Low | `src/keys/manager.zig:26-58`, `:139-188` | A04, A06 / CIS 3 | Mitigated-by-docs `7edbd8e` (residency + `clearCache` guidance; bounded cache deferred) |
+| FLE-008 | `BlindIndex.lookup` returns borrowed internal slice → dangling/UAF footgun | Low | `src/index/blind_index.zig:97-120` | A06 Insecure Design / CIS 16 | Resolved-by-docs `0f49b10` (borrowed lifetime documented) |
+| FLE-009 | Bulk path needs a thread-safe backing allocator, not documented/enforced | Low | `src/crypto/bulk.zig:230-263`, `:296-320` | A06 Insecure Design / CIS 16 | Resolved-by-docs `7edbd8e` |
+| FLE-010 | Dependency pin ref/hash mismatch; CI compiler ≠ declared minimum | Low | `build.zig.zon:11-14`; `.gitlab-ci.yml:27` | A08 Integrity, A03 Supply Chain / CIS 2, 16.4 | Upstream issue filed (devnw/zig/otel#168) + floor aligned `a4e05e4` |
+| FLE-011 | Custom HKDF reimplementation; only 1 of 7 RFC 5869 vectors tested | Low/Info | `src/crypto/hkdf.zig:21-67`, `:127-144` | A04 / CIS 16.1 vetted modules | Resolved `32a7340` (RFC 5869 cases 2-3 added) |
+| FLE-012 | "Portable" claim vs Linux-only RNG syscall | Info | `src/root.zig:5-6`; `src/crypto/aead.zig:155` | A06 / CIS 16 | Resolved `4770444` |
+| FLE-013 | `EnvKeyProvider` key-format edge cases (silent truncation, 64-byte raw rejected, partial key not zeroized) | Info/Low | `src/keys/provider.zig:100-124` | A04, A07 / CIS 3 | Resolved `74625b7` |
+| FLE-014 | `KeyManager` not thread-safe (documented) but mutated counters | Info | `src/root.zig:17-24`; `src/keys/manager.zig:47-58` | A06 / CIS 16 | Resolved `7edbd8e` (bulk docs cross-reference thread-safety contract) |
 
 ## 4. Finding Details
 
@@ -437,3 +437,13 @@ if (env_val.len >= 32) { @memcpy(&key, env_val[0..32]); return key; } // silent 
 7. **FLE-010 / FLE-011 / FLE-012 (Low/Info) — supply-chain and portability polish.** Regenerate `build.zig.zon` pins for consistency, align CI `ZIG_VERSION` with the declared minimum, add RFC 5869 vectors (or switch to stdlib HKDF), and reconcile the "portable" claim by moving to `std.crypto.random`.
 
 No confirmed RCE, authentication bypass, or secret-in-repo was found in the reviewed scope. The headline risks are the nonce-generation failure mode (FLE-001) and untrusted-envelope robustness (FLE-002); both are small, well-bounded fixes.
+
+## 8. Remediation Log (2026-06-11)
+
+All findings in section 3 were remediated or dispositioned in the 2026-06-11 audit remediation pass; per-finding status and commit refs are recorded in the Status column of the findings table.
+
+Supply-chain review (SCR) items from the same pass:
+
+- **SCR-001 / SCR-003 / SCR-004 — Resolved** in `bcfaa5f`: scoped gitleaks allowlist (replacing the blanket `.zig` exclusion), SHA-frozen pre-commit hooks, hash path validation, and CI input validation.
+- **SCR-002 + CI catalog component tag pins — Accepted**: the CI component catalog is org-internal; tag pinning is the accepted posture and is recorded here and in the plan's accepted/deferred list.
+- **FLE-010a upstream**: filed devnw/zig/otel#168 (`build.zig.zon` `.version` not bumped before tagging, so the v0.1.10 tag ships `otel-0.1.9-...` hash content). The `fle` pin remains content-hash-verified; the CI floor alignment landed in `a4e05e4`/`4a3af6e`.

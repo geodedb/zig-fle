@@ -1,6 +1,6 @@
 # GAP Analysis
 
-Last updated: 2026-03-23
+Last updated: 2026-06-11
 
 Repository status: FLE core extracted from Geode. All crypto, key management, blind index, and annotation modules are in place with passing tests. Cross-project overlap with `encrypted-fs` and `spyder/agent` has been analyzed.
 
@@ -235,12 +235,7 @@ Exposed through `src/root.zig`:
 
 All gaps are closed. No open gaps remain.
 
-Remaining low-severity items tracked but not blocking:
-
-- Unused error variants (`NonceReuse`, `SearchNotPermitted`, `RotationInProgress`) — forward-declared for future use
-- `KeyManager.wrapKey`/`unwrapKey` lack dedicated test coverage (underlying aead primitives are tested)
-- `EnvKeyProvider` lacks dedicated test coverage (requires env var mocking)
-- README Quick Start example is stale (correct example in root.zig doc comment)
+The low-severity items previously tracked here (unused error variants; `wrapKey`/`unwrapKey` test coverage; `EnvKeyProvider` test coverage; stale README Quick Start) were all resolved in the 2026-06-11 audit remediation pass — see `docs/GAP_ANALYSIS_RESOLVED.md`.
 
 ## Test Results
 
