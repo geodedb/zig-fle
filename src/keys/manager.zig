@@ -202,65 +202,51 @@ pub const KeyManager = struct {
         return buf[0..total];
     }
 
-    /// Get Field Encryption Key (FEK).
-    /// Derives TRK -> SK -> FEK using HKDF.
-    pub fn getFEK(self: *KeyManager, ids: types.KeyIds) ![32]u8 {
+    /// Shared cache-aware derivation: validate identifiers, try the
+    /// stack-keyed cache hit path, then derive TRK -> SK -> leaf and
+    /// insert under a heap-allocated injective cache key on miss.
+    fn getDerivedKey(
+        self: *KeyManager,
+        cache: *KeyCache,
+        comptime deriveLeaf: fn ([]const u8, []const u8, u16) anyerror![32]u8,
+        ids: types.KeyIds,
+    ) ![32]u8 {
         try validateIds(ids);
 
         var key_buf: [256]u8 = undefined;
         const stack_key = buildCacheKeyBuf(&key_buf, ids);
         if (stack_key) |sk_key| {
-            if (self.fek_cache.get(sk_key)) |entry| return entry.key;
+            if (cache.get(sk_key)) |entry| return entry.key;
         }
 
         var trk = try hkdf.deriveTRK(&self.master_key, ids.tenant);
         defer std.crypto.secureZero(u8, &trk);
         var sk = try hkdf.deriveSK(&trk, ids.schema);
         defer std.crypto.secureZero(u8, &sk);
-        const fek = try hkdf.deriveFEKVersioned(&sk, ids.field, ids.version);
+        const leaf = try deriveLeaf(&sk, ids.field, ids.version);
 
         const cache_key = try buildCacheKey(self.allocator, ids);
         errdefer self.allocator.free(cache_key);
         if (stack_key == null) {
             // Identifiers too long for the stack buffer — check the heap key
             // before inserting to avoid duplicate-key leaks.
-            if (self.fek_cache.get(cache_key)) |entry| {
+            if (cache.get(cache_key)) |entry| {
                 self.allocator.free(cache_key);
                 return entry.key;
             }
         }
-        try self.fek_cache.put(cache_key, .{ .key = fek, .version = ids.version });
-        return fek;
+        try cache.put(cache_key, .{ .key = leaf, .version = ids.version });
+        return leaf;
     }
 
-    /// Get Blind Index Key (BIK)
+    /// Get Field Encryption Key (FEK). Derives TRK -> SK -> FEK using HKDF.
+    pub fn getFEK(self: *KeyManager, ids: types.KeyIds) ![32]u8 {
+        return self.getDerivedKey(&self.fek_cache, hkdf.deriveFEKVersioned, ids);
+    }
+
+    /// Get Blind Index Key (BIK). Derives TRK -> SK -> BIK using HKDF.
     pub fn getBIK(self: *KeyManager, ids: types.KeyIds) ![32]u8 {
-        try validateIds(ids);
-
-        var key_buf: [256]u8 = undefined;
-        const stack_key = buildCacheKeyBuf(&key_buf, ids);
-        if (stack_key) |sk_key| {
-            if (self.bik_cache.get(sk_key)) |entry| return entry.key;
-        }
-
-        var trk = try hkdf.deriveTRK(&self.master_key, ids.tenant);
-        defer std.crypto.secureZero(u8, &trk);
-        var sk = try hkdf.deriveSK(&trk, ids.schema);
-        defer std.crypto.secureZero(u8, &sk);
-        const bik = try hkdf.deriveBIKVersioned(&sk, ids.field, ids.version);
-
-        const cache_key = try buildCacheKey(self.allocator, ids);
-        errdefer self.allocator.free(cache_key);
-        if (stack_key == null) {
-            // Identifiers too long for the stack buffer — check the heap key
-            // before inserting to avoid duplicate-key leaks.
-            if (self.bik_cache.get(cache_key)) |entry| {
-                self.allocator.free(cache_key);
-                return entry.key;
-            }
-        }
-        try self.bik_cache.put(cache_key, .{ .key = bik, .version = ids.version });
-        return bik;
+        return self.getDerivedKey(&self.bik_cache, hkdf.deriveBIKVersioned, ids);
     }
 
     /// Rotate FEK to new version.
