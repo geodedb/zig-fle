@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2025 CodePros
 
 const std = @import("std");
+const backend = @import("crypto_backend");
 const observability = @import("observability");
 
 /// Supported AEAD algorithms.
@@ -165,8 +166,19 @@ pub fn encryptField(
         return Error.InvalidAlg;
     }
 
+    // FIPS-approved selection: AES-256-GCM only under -Dfips=true.
+    // ChaCha20-Poly1305 is not FIPS-approved (spec §5 ChaCha->AES-GCM);
+    // reject it before allocating so rejection costs no alloc round-trip.
+    if (backend.fips_enabled and alg == .chacha20_poly1305) {
+        observability.endFleSpan(__obs_span, false);
+        return Error.InvalidAlg;
+    }
+
     var nonce: [12]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&nonce);
+    backend.Csprng.bytes(&nonce) catch {
+        observability.endFleSpan(__obs_span, false);
+        return Error.InvalidInput;
+    };
 
     const ciphertext = try allocator.alloc(u8, plaintext.len);
     errdefer allocator.free(ciphertext);
@@ -175,10 +187,13 @@ pub fn encryptField(
 
     switch (alg) {
         .aes256_gcm => {
-            const AES = std.crypto.aead.aes_gcm.Aes256Gcm;
-            AES.encrypt(ciphertext, &tag, plaintext, aad, nonce, fek[0..32].*);
+            backend.Aead.seal(.aes_256_gcm, fek[0..32], &nonce, aad, plaintext, ciphertext, &tag) catch {
+                observability.endFleSpan(__obs_span, false);
+                return Error.InvalidInput;
+            };
         },
         .chacha20_poly1305 => {
+            if (backend.fips_enabled) unreachable; // rejected above under fips
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
             ChaCha.encrypt(ciphertext, &tag, plaintext, aad, nonce, fek[0..32].*);
         },
@@ -243,22 +258,23 @@ pub fn decryptField(
 
     switch (alg) {
         .aes256_gcm => {
-            const AES = std.crypto.aead.aes_gcm.Aes256Gcm;
-            AES.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch |err| switch (err) {
-                // std.crypto's AEAD decrypt error set is AuthenticationFailed-only
-                // today; we map it to the generic AEADAuthFailed deliberately so
-                // callers get no decryption-failure oracle.
-                error.AuthenticationFailed => {
+            backend.Aead.open(.aes_256_gcm, fek[0..32], &envelope.nonce, aad, envelope.ciphertext, &envelope.tag, plaintext) catch |err| switch (err) {
+                // AuthFailed -> generic AEADAuthFailed (no decryption oracle).
+                // Unsupported/OpensslFailure also collapse to AEADAuthFailed
+                // so callers learn nothing beyond "decryption failed".
+                error.AuthFailed, error.Unsupported, error.OpensslFailure => {
                     observability.endFleSpan(__obs_span, false);
                     return Error.AEADAuthFailed;
                 },
             };
         },
         .chacha20_poly1305 => {
+            if (backend.fips_enabled) {
+                observability.endFleSpan(__obs_span, false);
+                return Error.InvalidAlg;
+            }
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
             ChaCha.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch |err| switch (err) {
-                // Same deliberate mapping as above: AuthenticationFailed-only
-                // error set, collapsed to generic AEADAuthFailed (no oracle).
                 error.AuthenticationFailed => {
                     observability.endFleSpan(__obs_span, false);
                     return Error.AEADAuthFailed;
@@ -323,7 +339,7 @@ test "AEAD round-trip with AES-256-GCM" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try backend.Csprng.bytes(&fek);
 
     const plaintext = "sensitive data";
     const aad = try makeAAD(allocator, "tenant1", "Person", "ssn", "node123", 1);
@@ -341,6 +357,54 @@ test "AEAD round-trip with AES-256-GCM" {
     try testing.expectEqualStrings(plaintext, decrypted);
 }
 
+test "AES-256-GCM round-trip works in both fips modes" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var fek: [32]u8 = undefined;
+    try backend.Csprng.bytes(&fek);
+
+    const aad = try makeAAD(allocator, "t", "s", "f", "r", 1);
+    defer allocator.free(aad);
+
+    var env = try encryptField(allocator, .aes256_gcm, &fek, aad, "payload", 1);
+    defer env.deinit(allocator);
+    const pt = try decryptField(allocator, &fek, aad, env);
+    defer {
+        std.crypto.secureZero(u8, pt);
+        allocator.free(pt);
+    }
+    try testing.expectEqualStrings("payload", pt);
+}
+
+test "ChaCha20-Poly1305 is rejected under -Dfips=true, allowed otherwise" {
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var fek: [32]u8 = undefined;
+    try backend.Csprng.bytes(&fek);
+    const aad = try makeAAD(allocator, "t", "s", "f", "r", 1);
+    defer allocator.free(aad);
+
+    if (backend.fips_enabled) {
+        // Under FIPS, ChaCha is not approved: encryptField must reject it.
+        try testing.expectError(Error.InvalidAlg, encryptField(allocator, .chacha20_poly1305, &fek, aad, "x", 1));
+    } else {
+        var env = try encryptField(allocator, .chacha20_poly1305, &fek, aad, "x", 1);
+        defer env.deinit(allocator);
+        const pt = try decryptField(allocator, &fek, aad, env);
+        defer {
+            std.crypto.secureZero(u8, pt);
+            allocator.free(pt);
+        }
+        try testing.expectEqualStrings("x", pt);
+    }
+}
+
 test "AEAD auth fails with wrong AAD" {
     const testing = std.testing;
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -348,7 +412,7 @@ test "AEAD auth fails with wrong AAD" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try backend.Csprng.bytes(&fek);
 
     const plaintext = "sensitive data";
     const aad1 = try makeAAD(allocator, "tenant1", "Person", "ssn", "node123", 1);
@@ -393,9 +457,9 @@ test "Envelope serialization round-trip" {
 
 test "wrapKey32/unwrapKey32 round-trip" {
     var key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&key);
+    try backend.Csprng.bytes(&key);
     var wrapping_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&wrapping_key);
+    try backend.Csprng.bytes(&wrapping_key);
 
     const wrapped = wrapKey32(key, wrapping_key);
     const unwrapped = try unwrapKey32(&wrapped, wrapping_key);
@@ -405,14 +469,14 @@ test "wrapKey32/unwrapKey32 round-trip" {
 
 test "unwrapKey32 rejects wrong wrapping key" {
     var key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&key);
+    try backend.Csprng.bytes(&key);
     var wrapping_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&wrapping_key);
+    try backend.Csprng.bytes(&wrapping_key);
 
     const wrapped = wrapKey32(key, wrapping_key);
 
     var wrong_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&wrong_key);
+    try backend.Csprng.bytes(&wrong_key);
 
     const result = unwrapKey32(&wrapped, wrong_key);
     try std.testing.expectError(Error.AEADAuthFailed, result);
@@ -433,7 +497,7 @@ test "encryptField rejects xchacha20_poly1305" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try backend.Csprng.bytes(&fek);
 
     const aad = try makeAAD(allocator, "t", "s", "f", "r", 1);
     defer allocator.free(aad);
@@ -548,7 +612,7 @@ test "encryptField produces unique nonces across calls" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try backend.Csprng.bytes(&fek);
 
     const aad = try makeAAD(allocator, "t", "s", "f", "r", 1);
     defer allocator.free(aad);
