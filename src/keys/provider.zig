@@ -169,6 +169,7 @@ test "parseKeyMaterial rejects truncatable / short / bad-hex values" {
 
 test "StaticKeyProvider round-trip" {
     var key: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&key);
 
     var static_prov = StaticKeyProvider.init(key);

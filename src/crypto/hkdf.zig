@@ -178,6 +178,7 @@ test "Key hierarchy derivation" {
     const testing = std.testing;
 
     var master: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&master);
 
     const tenant_id = "tenant-123";

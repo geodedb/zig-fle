@@ -19,6 +19,7 @@ pub fn main() !void {
     }
 
     var fek: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&fek);
 
     const N: usize = 1024;

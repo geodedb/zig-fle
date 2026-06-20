@@ -14,6 +14,7 @@ pub fn main() !void {
 
     // 1. Master key — source from your KMS/HSM in production.
     var master_key: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&master_key);
 
     const km = try fle.KeyManager.init(allocator, master_key);

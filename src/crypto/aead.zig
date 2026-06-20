@@ -135,8 +135,9 @@ pub fn makeAAD(
 pub const max_plaintext_size: usize = 64 * 1024;
 
 /// Encrypt field data with AEAD.
-/// Nonces are always generated from the process CSPRNG
-/// (`std.Io` `random`; infallible and seeded from OS entropy).
+/// Nonces are always generated from the CSPRNG seam
+/// (`backend.Csprng.bytes`; fallible — a draw failure is surfaced as
+/// `Error.InvalidInput`, handled below at the nonce-draw site).
 /// Only AES-256-GCM and ChaCha20-Poly1305 are supported through this API;
 /// use `wrapKey32` for XChaCha20-Poly1305 key wrapping.
 pub fn encryptField(

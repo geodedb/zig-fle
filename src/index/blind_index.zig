@@ -179,6 +179,7 @@ test "BlindIndex put and lookup" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "alice@example.com", "person1");
@@ -208,6 +209,7 @@ test "BlindIndex normalization handles case and whitespace" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "  Alice@EXAMPLE.com  ", "person1");
@@ -227,6 +229,7 @@ test "BlindIndex field keys are injective across schema/field boundaries" {
     var index = BlindIndex.init(allocator);
     defer index.deinit();
     var bik: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("a.b", "c", bik, "v", "r1");
@@ -245,6 +248,7 @@ test "BlindIndex remove" {
     defer index.deinit();
 
     var bik: [32]u8 = undefined;
+    // fips-exempt: non-security — test/example fixture key generation
     std.Io.Threaded.global_single_threaded.io().random(&bik);
 
     try index.put("Person", "email", bik, "alice@example.com", "person1");
