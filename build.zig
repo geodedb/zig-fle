@@ -186,6 +186,23 @@ pub fn build(b: *std.Build) void {
     const run_seam_tests = b.addRunArtifact(seam_tests);
     test_step.dependOn(&run_seam_tests.step);
 
+    // FIPS enforcement proof (spec §5/§7): ChaCha rejected + key-wrap
+    // compiled out under fips; both available otherwise. Dual-mode.
+    const enforcement_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/fips_enforcement_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "fle", .module = module },
+                .{ .name = "crypto_backend", .module = crypto_backend_mod },
+            },
+        }),
+    });
+    if (fips) link.linkOpenssl(b, enforcement_tests.root_module, openssl_path);
+    const run_enforcement_tests = b.addRunArtifact(enforcement_tests);
+    test_step.dependOn(&run_enforcement_tests.step);
+
     // Observability seam tests. See addObservabilityTests for the
     // disabled/enabled split.
     addObservabilityTests(b, target, optimize, module, build_options_mod, otel_mod, crypto_backend_mod, fips, openssl_path, test_step);
