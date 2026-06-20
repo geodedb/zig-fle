@@ -54,7 +54,7 @@ pub fn main() !void {
     const allocator = std.heap.smp_allocator;
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     var pool = try tp.ThreadPool.init(allocator, .{ .max_threads = 8 });
     defer {

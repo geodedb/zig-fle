@@ -20,7 +20,7 @@ test "integration: full encrypt/decrypt lifecycle" {
 
     // Create a master key (caller-provided, not from env)
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -72,7 +72,7 @@ test "integration: key hierarchy produces distinct keys" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -101,7 +101,7 @@ test "integration: key rotation produces new FEK" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -135,7 +135,7 @@ test "integration: blind index search on encrypted field" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var km = try fle.KeyManager.init(allocator, master_key);
     defer km.deinit();
@@ -201,12 +201,13 @@ test "integration: annotation-driven encryption metadata" {
 // ============================================================================
 
 test "integration: ChaCha20-Poly1305 encrypt/decrypt" {
+    if (@import("crypto_backend").fips_enabled) return error.SkipZigTest;
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     const aad = try fle.aead.makeAAD(allocator, "t1", "X", "f", "r1", 1);
     defer allocator.free(aad);
@@ -221,6 +222,27 @@ test "integration: ChaCha20-Poly1305 encrypt/decrypt" {
     }
 
     try std.testing.expectEqualStrings("secret", decrypted);
+}
+
+test "integration: AES-256-GCM works under both fips modes" {
+    const backend = @import("crypto_backend");
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var fek: [32]u8 = undefined;
+    try backend.Csprng.bytes(&fek);
+    const aad = try fle.aead.makeAAD(allocator, "t1", "X", "f", "r1", 1);
+    defer allocator.free(aad);
+
+    var env = try fle.aead.encryptField(allocator, .aes256_gcm, &fek, aad, "secret", 1);
+    defer env.deinit(allocator);
+    const pt = try fle.aead.decryptField(allocator, &fek, aad, env);
+    defer {
+        std.crypto.secureZero(u8, pt);
+        allocator.free(pt);
+    }
+    try std.testing.expectEqualStrings("secret", pt);
 }
 
 // ============================================================================
@@ -250,7 +272,7 @@ test "bulk parallel matches serial for identical inputs" {
     }
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     const N = 2048;
     const fields = try allocator.alloc(fle.BulkField, N);
