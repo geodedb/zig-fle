@@ -2,13 +2,17 @@
 // Copyright (c) 2024-2025 CodePros
 
 const std = @import("std");
+const backend = @import("crypto_backend");
 
-/// Compute HMAC-SHA256 blind index token
+/// Compute HMAC-SHA256 blind index token via the FIPS seam.
+///
+/// Under -Dfips=true this is OpenSSL's FIPS HMAC-SHA256; under
+/// -Dfips=false it is std.crypto's HMAC-SHA256. The seam cannot fail
+/// for a fixed 32-byte SHA-256 output under a loaded provider; on the
+/// unreachable OpensslFailure path we panic rather than widen this
+/// infallible-by-contract signature.
 pub fn blindIndexHmac256(out: *[32]u8, bik: []const u8, normalized: []const u8) void {
-    const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
-    var mac = Hmac.init(bik);
-    mac.update(normalized);
-    mac.final(out);
+    _ = backend.Mac.hmac(.sha256, bik, normalized, out) catch @panic("FIPS HMAC-SHA256 failed");
 }
 
 /// Normalize value for blind index: ASCII lowercase + trim.
@@ -81,6 +85,14 @@ test "HMAC-SHA256 RFC 4231 test vector - Jefe" {
     };
 
     try testing.expectEqualSlices(u8, &expected, &out);
+}
+
+test "blindIndexHmac256 routes through the FIPS seam" {
+    var ours: [32]u8 = undefined;
+    blindIndexHmac256(&ours, "Jefe", "what do ya want for nothing?");
+    var seam: [32]u8 = undefined;
+    _ = try backend.Mac.hmac(.sha256, "Jefe", "what do ya want for nothing?", &seam);
+    try std.testing.expectEqualSlices(u8, &seam, &ours);
 }
 
 test "Normalization for blind index" {
