@@ -4,7 +4,7 @@
 
 .PHONY: all build test test-unit test-integration bench clean check fmt help dev ci
 .PHONY: test-release-safe test-release-fast test-release-small test-all-optimizations
-.PHONY: pre-commit-install pre-commit pre-commit-run
+.PHONY: pre-commit-install pre-commit pre-commit-run test-fips test-dual
 
 # Default target: build and run tests
 all: build test-unit
@@ -28,6 +28,19 @@ test-unit:
 test-integration:
 	@echo "🔗 Running integration tests..."
 	@zig build test-integration --summary all
+
+# Run the suite against the linked OpenSSL FIPS-140-3 provider (-Dfips=true).
+# Requires the FIPS-built OpenSSL (see the `fips` package `make deps`,
+# default prefix /usr/local/ssl; override with OPENSSL_PREFIX=).
+test-fips:
+	@echo "🔐 Running FIPS-mode tests..."
+	@OPENSSL_CONF=$(or $(OPENSSL_PREFIX),/usr/local/ssl)/ssl/openssl.cnf zig build test -Dfips=true -Dopenssl_path=$(or $(OPENSSL_PREFIX),/usr/local/ssl) --summary all
+	@OPENSSL_CONF=$(or $(OPENSSL_PREFIX),/usr/local/ssl)/ssl/openssl.cnf zig build test-integration -Dfips=true -Dopenssl_path=$(or $(OPENSSL_PREFIX),/usr/local/ssl) --summary all
+
+# Run BOTH the std-shim suite (-Dfips=false) and the OpenSSL FIPS suite
+# (-Dfips=true). The dual-mode gate for the FIPS/PQC consolidation.
+test-dual: test test-fips
+	@echo "✅ Dual-mode (-Dfips on/off) tests completed"
 
 # Run micro-benchmarks (full module graph in ReleaseFast)
 bench:

@@ -8,7 +8,8 @@
 //!
 //! ## Features
 //!
-//! - AEAD envelope encryption (AES-256-GCM, ChaCha20-Poly1305)
+//! - AEAD envelope encryption (AES-256-GCM; ChaCha20-Poly1305 is
+//!   non-FIPS and rejected/compiled out under `-Dfips=true`)
 //! - HKDF-SHA256 hierarchical key derivation (TRK -> SK -> FEK/BIK)
 //! - Blind-index HMAC for searchable encrypted fields
 //! - Schema annotation parsing for encryption/search metadata
@@ -80,7 +81,8 @@ pub const version = "0.1.6";
 // Submodule re-exports
 // ============================================================================
 
-/// AEAD envelope encryption (AES-256-GCM, ChaCha20-Poly1305)
+/// AEAD envelope encryption (AES-256-GCM; ChaCha20-Poly1305 non-FIPS,
+/// rejected under `-Dfips=true` — see docs/FIPS.md).
 pub const aead = @import("crypto/aead.zig");
 
 /// HKDF-SHA256 key derivation — general-purpose RFC 5869 implementation
@@ -127,7 +129,9 @@ else
 // Convenience aliases for the most common public types
 // ============================================================================
 
-/// AEAD algorithm selector (AES-256-GCM, ChaCha20-Poly1305, XChaCha20-Poly1305 for key wrap).
+/// AEAD algorithm selector. AES-256-GCM is the only FIPS-approved envelope
+/// algorithm; ChaCha20-Poly1305 and XChaCha20-Poly1305 (key wrap) are
+/// non-FIPS and rejected/compiled out under `-Dfips=true` (see docs/FIPS.md).
 pub const Alg = aead.Alg;
 /// Serialized encrypted-field envelope (alg, key version, nonce, tag, ciphertext).
 pub const EnvelopeV1 = aead.EnvelopeV1;

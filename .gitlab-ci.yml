@@ -172,6 +172,55 @@ test-release-small:
   needs:
     - build
 
+# ---------------------------------------------------------------------------
+# FIPS-140-3 dual-mode gate
+#
+# `fips-deps` provisions the FIPS-built OpenSSL 3.x provider (the `fips`
+# package's `make deps`, default prefix /usr/local/ssl) and exports it as an
+# artifact. `test-fips` then runs the suite with the linked FIPS backend
+# (-Dfips=true). The default `test`/`test-integration` jobs above already
+# cover the std-shim (-Dfips=false) path, so together they form the dual-mode
+# gate. The deps step is the ci-catalog FIPS/PQC setup contract; until the
+# `zig-fips-build` component is published, it shells the install script.
+# ---------------------------------------------------------------------------
+fips-deps:
+  stage: build
+  image: debian:bookworm-slim
+  before_script:
+    - apt-get update && apt-get install -y curl perl build-essential
+  script:
+    # Builds the latest OpenSSL 3.x with `enable-fips` and runs
+    # `openssl fipsinstall`, installing to /usr/local/ssl. Provided by the
+    # `fips` package (scripts/install-openssl-fips.sh / `make deps`); in this
+    # repo it is fetched from the ci-catalog FIPS/PQC component setup.
+    - curl -fsSL "https://gitlab.com/devnw/zig/fips/-/raw/main/scripts/install-openssl-fips.sh" -o install-openssl-fips.sh
+    - chmod +x install-openssl-fips.sh
+    - OPENSSL_PREFIX=/usr/local/ssl ./install-openssl-fips.sh
+    - OPENSSL_CONF=/usr/local/ssl/ssl/openssl.cnf /usr/local/ssl/bin/openssl list -providers | grep -A1 fips
+  artifacts:
+    paths:
+      - /usr/local/ssl
+    expire_in: 1 day
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+test-fips:
+  stage: test
+  image: debian:bookworm-slim
+  before_script:
+    - *install-zig
+  script:
+    - export OPENSSL_CONF=/usr/local/ssl/ssl/openssl.cnf
+    - zig build test -Dfips=true -Dopenssl_path=/usr/local/ssl --summary all
+    - zig build test-integration -Dfips=true -Dopenssl_path=/usr/local/ssl --summary all
+  needs:
+    - build
+    - fips-deps
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
 # Coverage-guided fuzz testing.
 # Runs with a 60-second timeout so the job always terminates.
 #

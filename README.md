@@ -155,10 +155,41 @@ propagate into FLE crypto operations.
 For the full integration recipe and template files, see
 `otel/docs/integration/RECIPE.md` in the otel repo.
 
+## FIPS-140-3 mode
+
+`fle` supports a build-flag-gated FIPS-140-3 mode. Build with `-Dfips=true` to
+route all security crypto (AES-256-GCM, HKDF-SHA256, HMAC-SHA256, CSPRNG)
+through a linked OpenSSL 3.x FIPS provider via the `src/crypto_backend.zig`
+seam. The default (`-Dfips=false`) uses a `std.crypto`-backed shim with **zero
+overhead, no `fips` dependency, and no OpenSSL link**.
+
+Behavior changes under `-Dfips=true`:
+
+- `aead.encryptField`/`decryptField` reject `ChaCha20-Poly1305` (not
+  FIPS-approved) with `Error.InvalidAlg` — use **AES-256-GCM**, the only
+  approved envelope algorithm.
+- `wrapKey32`/`unwrapKey32` (XChaCha20-Poly1305 key wrap) are **compiled out**
+  (`fle.key_wrap` is empty); use `KeyManager.wrapKey`/`unwrapKey` (AES-256-GCM).
+
+The `EnvelopeV1` wire format, AAD construction, key hierarchy, blind index, and
+bulk API are unchanged across modes.
+
+```bash
+zig build test                      # default: -Dfips=false (std shim, no OpenSSL)
+OPENSSL_CONF=/usr/local/ssl/ssl/openssl.cnf \
+  zig build test -Dfips=true -Dopenssl_path=/usr/local/ssl --summary all
+make test-dual                      # both modes
+```
+
+See [docs/FIPS.md](docs/FIPS.md) for the full algorithm policy, the seam
+contract, and the dual-mode test gate.
+
 ## Documentation
 
 - [docs/KEY_HIERARCHY.md](docs/KEY_HIERARCHY.md) — key derivation, envelope
   format, blind-index flow, rotation, and zeroization guarantees
+- [docs/FIPS.md](docs/FIPS.md) — FIPS-140-3 mode, the crypto seam, approved
+  algorithms, and behavior changes under `-Dfips=true`
 - See the [docs](docs/) directory for the rest of the documentation.
 
 ## Contributing
