@@ -290,47 +290,66 @@ pub fn decryptField(
 
 // ============================================================================
 // Standalone key wrapping (stack-only, no allocator)
+//
+// XChaCha20-Poly1305 is NOT FIPS-approved. Under -Dfips=true the
+// `wrapKey32`/`unwrapKey32` helpers are compiled out (the `key_wrap`
+// namespace becomes empty and the file-scope re-exports are absent);
+// callers needing FIPS key wrapping use KeyManager.wrapKey/unwrapKey
+// (AES-256-GCM via encryptField/decryptField).
+//
+// NOTE (deviation from plan's `usingnamespace`): Zig 0.16 REMOVED
+// `pub usingnamespace`, so the FIPS-gating is implemented via a
+// comptime-selected namespace struct (`key_wrap`) whose members are
+// genuinely absent under fips. `@hasDecl(@This(), "wrapKey32")` cannot
+// be made false for a top-level `pub const` (a void-bound decl still
+// reports present), so presence is asserted on the `key_wrap` namespace
+// instead — the functions are still fully compiled out under fips.
 // ============================================================================
 
 /// Size of a wrapped 32-byte key: nonce(24) + tag(16) + ciphertext(32) = 72 bytes.
 pub const wrapped_key_size: usize = 24 + 16 + 32;
 
-/// Wrap a 32-byte key using XChaCha20-Poly1305.
-/// Returns a fixed 72-byte array: nonce(24) || tag(16) || ciphertext(32).
-/// Stack-only operation — no allocator required.
-pub fn wrapKey32(key: [32]u8, wrapping_key: [32]u8) [wrapped_key_size]u8 {
-    const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
-    var result: [wrapped_key_size]u8 = undefined;
+/// XChaCha20-Poly1305 key-wrap namespace. Empty under -Dfips=true
+/// (XChaCha is non-FIPS); under -Dfips=false it exposes
+/// `wrapKey32`/`unwrapKey32`.
+pub const key_wrap = if (backend.fips_enabled) struct {} else struct {
+    /// Wrap a 32-byte key using XChaCha20-Poly1305. (non-FIPS only)
+    /// Returns a fixed 72-byte array: nonce(24) || tag(16) || ciphertext(32).
+    /// Stack-only operation — no allocator required.
+    pub fn wrapKey32(key: [32]u8, wrapping_key: [32]u8) [wrapped_key_size]u8 {
+        const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
+        var result: [wrapped_key_size]u8 = undefined;
 
-    var nonce: [24]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&nonce);
-    @memcpy(result[0..24], &nonce);
+        var nonce: [24]u8 = undefined;
+        backend.Csprng.bytes(&nonce) catch @panic("CSPRNG failure");
+        @memcpy(result[0..24], &nonce);
 
-    var tag: [16]u8 = undefined;
-    XChaCha.encrypt(result[40..72], &tag, &key, "", nonce, wrapping_key);
-    @memcpy(result[24..40], &tag);
+        var tag: [16]u8 = undefined;
+        XChaCha.encrypt(result[40..72], &tag, &key, "", nonce, wrapping_key);
+        @memcpy(result[24..40], &tag);
 
-    return result;
-}
+        return result;
+    }
 
-/// Unwrap a 32-byte key from a 72-byte wrapped blob.
-/// Input format: nonce(24) || tag(16) || ciphertext(32).
-/// Stack-only operation — no allocator required.
-pub fn unwrapKey32(wrapped: *const [wrapped_key_size]u8, wrapping_key: [32]u8) ![32]u8 {
-    const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
+    /// Unwrap a 32-byte key from a 72-byte wrapped blob. (non-FIPS only)
+    /// Input format: nonce(24) || tag(16) || ciphertext(32).
+    /// Stack-only operation — no allocator required.
+    pub fn unwrapKey32(wrapped: *const [wrapped_key_size]u8, wrapping_key: [32]u8) ![32]u8 {
+        const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 
-    const nonce = wrapped[0..24].*;
-    const tag = wrapped[24..40].*;
-    const ciphertext = wrapped[40..72];
+        const nonce = wrapped[0..24].*;
+        const tag = wrapped[24..40].*;
+        const ciphertext = wrapped[40..72];
 
-    var plaintext: [32]u8 = undefined;
-    XChaCha.decrypt(&plaintext, ciphertext, tag, "", nonce, wrapping_key) catch {
-        std.crypto.secureZero(u8, &plaintext);
-        return Error.AEADAuthFailed;
-    };
+        var plaintext: [32]u8 = undefined;
+        XChaCha.decrypt(&plaintext, ciphertext, tag, "", nonce, wrapping_key) catch {
+            std.crypto.secureZero(u8, &plaintext);
+            return Error.AEADAuthFailed;
+        };
 
-    return plaintext;
-}
+        return plaintext;
+    }
+};
 
 test "AEAD round-trip with AES-256-GCM" {
     const testing = std.testing;
@@ -455,30 +474,48 @@ test "Envelope serialization round-trip" {
     try testing.expectEqualSlices(u8, envelope.ciphertext, deserialized.ciphertext);
 }
 
+test "key-wrap surface is FIPS-aware" {
+    if (backend.fips_enabled) {
+        // XChaCha20-Poly1305 wrapKey32 is compiled out under FIPS.
+        try std.testing.expect(!@hasDecl(key_wrap, "wrapKey32"));
+        try std.testing.expect(!@hasDecl(key_wrap, "unwrapKey32"));
+    } else {
+        var key: [32]u8 = undefined;
+        var wk: [32]u8 = undefined;
+        try backend.Csprng.bytes(&key);
+        try backend.Csprng.bytes(&wk);
+        const wrapped = key_wrap.wrapKey32(key, wk);
+        const unwrapped = try key_wrap.unwrapKey32(&wrapped, wk);
+        try std.testing.expectEqualSlices(u8, &key, &unwrapped);
+    }
+}
+
 test "wrapKey32/unwrapKey32 round-trip" {
+    if (backend.fips_enabled) return error.SkipZigTest;
     var key: [32]u8 = undefined;
     try backend.Csprng.bytes(&key);
     var wrapping_key: [32]u8 = undefined;
     try backend.Csprng.bytes(&wrapping_key);
 
-    const wrapped = wrapKey32(key, wrapping_key);
-    const unwrapped = try unwrapKey32(&wrapped, wrapping_key);
+    const wrapped = key_wrap.wrapKey32(key, wrapping_key);
+    const unwrapped = try key_wrap.unwrapKey32(&wrapped, wrapping_key);
 
     try std.testing.expectEqualSlices(u8, &key, &unwrapped);
 }
 
 test "unwrapKey32 rejects wrong wrapping key" {
+    if (backend.fips_enabled) return error.SkipZigTest;
     var key: [32]u8 = undefined;
     try backend.Csprng.bytes(&key);
     var wrapping_key: [32]u8 = undefined;
     try backend.Csprng.bytes(&wrapping_key);
 
-    const wrapped = wrapKey32(key, wrapping_key);
+    const wrapped = key_wrap.wrapKey32(key, wrapping_key);
 
     var wrong_key: [32]u8 = undefined;
     try backend.Csprng.bytes(&wrong_key);
 
-    const result = unwrapKey32(&wrapped, wrong_key);
+    const result = key_wrap.unwrapKey32(&wrapped, wrong_key);
     try std.testing.expectError(Error.AEADAuthFailed, result);
 }
 

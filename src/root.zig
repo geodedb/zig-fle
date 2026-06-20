@@ -71,6 +71,7 @@
 //! ```
 
 const std = @import("std");
+const crypto_backend = @import("crypto_backend");
 
 /// Library version
 pub const version = "0.1.6";
@@ -130,10 +131,26 @@ else
 pub const Alg = aead.Alg;
 /// Serialized encrypted-field envelope (alg, key version, nonce, tag, ciphertext).
 pub const EnvelopeV1 = aead.EnvelopeV1;
-/// Wrap a 32-byte key with XChaCha20-Poly1305 (stack-only, no allocator).
-pub const wrapKey32 = aead.wrapKey32;
-/// Unwrap a 32-byte key previously wrapped with `wrapKey32`.
-pub const unwrapKey32 = aead.unwrapKey32;
+
+/// XChaCha20-Poly1305 key-wrap namespace (stack-only, no allocator).
+/// XChaCha is NOT FIPS-approved: under -Dfips=true this namespace is
+/// EMPTY (`wrapKey32`/`unwrapKey32` absent — use `KeyManager.wrapKey`/
+/// `unwrapKey`, which are AES-256-GCM); under -Dfips=false it exposes
+/// `key_wrap.wrapKey32`/`key_wrap.unwrapKey32`.
+///
+/// Zig 0.16 removed `pub usingnamespace`, so FIPS-absence is asserted on
+/// this namespace (genuinely empty under fips) rather than via
+/// `@hasDecl(fle, "wrapKey32")` — a top-level `pub const` always reports
+/// present. The flat `wrapKey32`/`unwrapKey32` aliases below resolve to
+/// `void` under fips (so they pull no XChaCha code) and to the real
+/// functions under non-fips for backward-compatible call sites.
+pub const key_wrap = aead.key_wrap;
+/// Wrap a 32-byte key with XChaCha20-Poly1305 (stack-only). Non-FIPS only;
+/// `void` under -Dfips=true (use `KeyManager.wrapKey`).
+pub const wrapKey32 = if (crypto_backend.fips_enabled) {} else aead.key_wrap.wrapKey32;
+/// Unwrap a 32-byte key previously wrapped with `wrapKey32`. Non-FIPS only;
+/// `void` under -Dfips=true (use `KeyManager.unwrapKey`).
+pub const unwrapKey32 = if (crypto_backend.fips_enabled) {} else aead.key_wrap.unwrapKey32;
 /// RFC 5869 HKDF-SHA256 (arbitrary output length).
 pub const hkdfSha256 = hkdf.hkdfSha256;
 /// Derive a single 32-byte key via HKDF-SHA256.
