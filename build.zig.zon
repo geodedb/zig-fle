@@ -13,6 +13,21 @@
             .hash = "otel-0.1.9-B0v3ltPiNQD_qlCLj0oUor4puasXR8KWGfPpaE48icHy",
             .lazy = true,
         },
+        // Local PATH dependency for the FIPS backend. There is no published
+        // remote yet, so it is wired as an absolute path. `.lazy = true`
+        // keeps a default (-Dfips=false) build from ever resolving it: the
+        // dep is reached only by `b.lazyDependency("fips", ...)` in build.zig
+        // when -Dfips=true. The eventual production form is the git+https
+        // lazy entry:
+        //   .fips = .{
+        //       .url = "git+https://gitlab.com/devnw/zig/fips.git?ref=v0.1.0#<commit-sha>",
+        //       .hash = "<zig-package-hash>",
+        //       .lazy = true,
+        //   },
+        .fips = .{
+            .path = "../../../../../devnw/zig/fips",
+            .lazy = true,
+        },
     },
     .paths = .{
         "build.zig",
