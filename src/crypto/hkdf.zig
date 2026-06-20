@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2025 CodePros
 
 const std = @import("std");
+const backend = @import("crypto_backend");
 
 /// Default salt used in the FLE key hierarchy.
 /// Kept consistent with Geode for interoperability.
@@ -9,9 +10,11 @@ pub const default_salt = "geode-fle-salt";
 
 /// General-purpose HKDF-SHA256 key derivation (RFC 5869).
 ///
-/// Derives output keying material of arbitrary length from input keying
-/// material, salt, and info context. Usable for any key derivation need,
-/// not only the FLE key hierarchy.
+/// Delegates to the FIPS seam (`crypto_backend.Kdf.hkdf`). Under
+/// -Dfips=true this is OpenSSL's FIPS HKDF (SP 800-56C); under
+/// -Dfips=false it is std.crypto's HKDF. Output length is bounded by
+/// HKDF's 255*HashLen limit; the seam returns error.OpensslFailure on
+/// over-length output.
 ///
 /// Parameters:
 ///   out  - output buffer (any length up to 255 * 32 bytes)
@@ -24,46 +27,7 @@ pub fn hkdfSha256(
     salt: []const u8,
     info: []const u8,
 ) !void {
-    const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
-
-    // Extract: PRK = HMAC-SHA256(salt, IKM)
-    var prk: [32]u8 = undefined;
-    var extract_hmac = Hmac.init(salt);
-    extract_hmac.update(ikm);
-    extract_hmac.final(&prk);
-    defer std.crypto.secureZero(u8, &prk);
-
-    // Expand: OKM = T(1) || T(2) || ... || T(N)
-    var okm_pos: usize = 0;
-    var counter: u8 = 1;
-    var t_prev: [32]u8 = undefined;
-    var t_prev_len: usize = 0;
-
-    while (okm_pos < out.len) {
-        var expand_hmac = Hmac.init(&prk);
-
-        if (counter > 1) {
-            expand_hmac.update(t_prev[0..t_prev_len]);
-        }
-
-        expand_hmac.update(info);
-        expand_hmac.update(&[_]u8{counter});
-
-        var t: [32]u8 = undefined;
-        expand_hmac.final(&t);
-
-        const copy_len = @min(32, out.len - okm_pos);
-        @memcpy(out[okm_pos .. okm_pos + copy_len], t[0..copy_len]);
-
-        @memcpy(&t_prev, &t);
-        std.crypto.secureZero(u8, &t);
-        t_prev_len = 32;
-        okm_pos += copy_len;
-        counter += 1;
-
-        if (counter == 0) return error.HkdfOutputTooLong;
-    }
-    std.crypto.secureZero(u8, &t_prev);
+    try backend.Kdf.hkdf(.sha256, ikm, salt, info, out);
 }
 
 /// Derive a 32-byte key from input keying material with salt and context.
@@ -233,4 +197,15 @@ test "Key hierarchy derivation" {
     // Same inputs produce same keys
     const fek2 = try deriveFEK(&sk, field);
     try testing.expectEqualSlices(u8, &fek, &fek2);
+}
+
+test "hkdfSha256 routes through the FIPS seam (RFC 5869 TC1)" {
+    const ikm = [_]u8{0x0b} ** 22;
+    const salt = [_]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c };
+    const info = [_]u8{ 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9 };
+    var seam_okm: [42]u8 = undefined;
+    try backend.Kdf.hkdf(.sha256, &ikm, &salt, &info, &seam_okm);
+    var our_okm: [42]u8 = undefined;
+    try hkdfSha256(&our_okm, &ikm, &salt, &info);
+    try std.testing.expectEqualSlices(u8, &seam_okm, &our_okm);
 }
