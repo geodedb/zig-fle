@@ -332,12 +332,16 @@ test "encryptFieldsBulk serial: round-trip across 3 fields" {
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
+    // Under FIPS, ChaCha20-Poly1305 is rejected; use AES-256-GCM for the
+    // third field so the bulk round-trip exercises 3 successes in both modes.
+    const backend = @import("crypto_backend");
+    const third_alg: Alg = if (backend.fips_enabled) .aes256_gcm else .chacha20_poly1305;
     const fields = [_]BulkField{
         .{ .fek = &fek, .alg = .aes256_gcm, .tenant_id = "t1", .schema = "Person", .field = "ssn", .record_id = "r1", .key_version = 1, .plaintext = "111-11-1111" },
         .{ .fek = &fek, .alg = .aes256_gcm, .tenant_id = "t1", .schema = "Person", .field = "email", .record_id = "r1", .key_version = 1, .plaintext = "a@b.com" },
-        .{ .fek = &fek, .alg = .chacha20_poly1305, .tenant_id = "t1", .schema = "Person", .field = "phone", .record_id = "r1", .key_version = 1, .plaintext = "555-0100" },
+        .{ .fek = &fek, .alg = third_alg, .tenant_id = "t1", .schema = "Person", .field = "phone", .record_id = "r1", .key_version = 1, .plaintext = "555-0100" },
     };
 
     var results = [_]BulkResult{.{ .err = Error.InvalidAlg }} ** 3;
@@ -350,7 +354,30 @@ test "encryptFieldsBulk serial: round-trip across 3 fields" {
     try testing.expectEqual(@as(usize, 3), ok_count);
     for (results) |r| try testing.expect(r == .ok);
     try testing.expectEqual(@as(u8, @intFromEnum(Alg.aes256_gcm)), results[0].ok.alg_id);
-    try testing.expectEqual(@as(u8, @intFromEnum(Alg.chacha20_poly1305)), results[2].ok.alg_id);
+    try testing.expectEqual(@as(u8, @intFromEnum(third_alg)), results[2].ok.alg_id);
+}
+
+test "encryptFieldsBulk AES-only round-trip works in both fips modes" {
+    const backend = @import("crypto_backend");
+    const testing = std.testing;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var fek: [32]u8 = undefined;
+    try backend.Csprng.bytes(&fek);
+
+    const fields = [_]BulkField{
+        .{ .fek = &fek, .alg = .aes256_gcm, .tenant_id = "t", .schema = "S", .field = "a", .record_id = "r", .key_version = 1, .plaintext = "111" },
+        .{ .fek = &fek, .alg = .aes256_gcm, .tenant_id = "t", .schema = "S", .field = "b", .record_id = "r", .key_version = 1, .plaintext = "222" },
+    };
+    var results = [_]BulkResult{.{ .err = Error.InvalidAlg }} ** 2;
+    const ok = try encryptFieldsBulk(allocator, null, &fields, &results, .{});
+    defer for (&results) |*r| switch (r.*) {
+        .ok => |*env| env.deinit(allocator),
+        .err => {},
+    };
+    try testing.expectEqual(@as(usize, 2), ok);
 }
 
 test "encryptFieldsBulk serial: partial success — oversized plaintext errors one slot" {
@@ -360,7 +387,7 @@ test "encryptFieldsBulk serial: partial success — oversized plaintext errors o
     const allocator = gpa.allocator();
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     // Build an intentionally oversized plaintext (> max_plaintext_size).
     const oversized = try allocator.alloc(u8, aead.max_plaintext_size + 1);
@@ -400,7 +427,7 @@ test "encryptFieldsBulk parallel: 10k fields across 4 workers" {
     }
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     const N = 10_000;
     const fields = try allocator.alloc(BulkField, N);
@@ -466,7 +493,7 @@ test "decryptFieldsBulk: round-trip 10k envelopes through parallel encrypt + par
     }
 
     var fek: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&fek);
+    try @import("crypto_backend").Csprng.bytes(&fek);
 
     const N = 10_000;
     const enc_fields = try allocator.alloc(BulkField, N);

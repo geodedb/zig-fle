@@ -342,7 +342,7 @@ test "KeyManager FEK derivation and caching" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -371,7 +371,7 @@ test "KeyManager FEK rotation" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -412,7 +412,7 @@ test "KeyManager BIK derivation" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -437,7 +437,7 @@ test "KeyManager initWithProvider using StaticKeyProvider" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var static_prov = provider_mod.StaticKeyProvider.init(master_key);
     const prov = static_prov.provider();
@@ -468,7 +468,7 @@ test "rotateFEK version persists across multiple rotations" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
@@ -490,7 +490,7 @@ test "getFEK rejects identifiers containing reserved delimiters" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
 
@@ -509,7 +509,7 @@ test "cache keys are injective — no cross-identifier collision" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
 
@@ -528,14 +528,14 @@ test "KeyManager wrapKey/unwrapKey round-trip" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
 
     var wrapping_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&wrapping_key);
+    try @import("crypto_backend").Csprng.bytes(&wrapping_key);
     var key_to_wrap: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&key_to_wrap);
+    try @import("crypto_backend").Csprng.bytes(&key_to_wrap);
 
     var envelope = try manager.wrapKey(&key_to_wrap, &wrapping_key);
     defer envelope.deinit(allocator);
@@ -548,7 +548,7 @@ test "KeyManager wrapKey/unwrapKey round-trip" {
     try testing.expectEqualSlices(u8, &key_to_wrap, unwrapped);
 
     var wrong_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&wrong_key);
+    try @import("crypto_backend").Csprng.bytes(&wrong_key);
     try testing.expectError(aead.Error.AEADAuthFailed, manager.unwrapKey(envelope, &wrong_key));
 }
 
@@ -568,7 +568,7 @@ test "clearCache forces re-derivation" {
     const allocator = gpa.allocator();
 
     var master_key: [32]u8 = undefined;
-    std.Io.Threaded.global_single_threaded.io().random(&master_key);
+    try @import("crypto_backend").Csprng.bytes(&master_key);
 
     var manager = try KeyManager.init(allocator, master_key);
     defer manager.deinit();
