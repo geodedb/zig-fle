@@ -195,6 +195,10 @@ pub fn encryptField(
         },
         .chacha20_poly1305 => {
             if (backend.fips_enabled) unreachable; // rejected above under fips
+            // fips-exempt: non-security — non-FIPS algorithm on the seam's
+            // consumer-owned non-fips escape hatch. ChaCha20-Poly1305 is not
+            // FIPS-approved and is absent from the crypto_backend Aead policy
+            // (AES-GCM only); this branch is unreachable under -Dfips=true.
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
             ChaCha.encrypt(ciphertext, &tag, plaintext, aad, nonce, fek[0..32].*);
         },
@@ -274,6 +278,10 @@ pub fn decryptField(
                 observability.endFleSpan(__obs_span, false);
                 return Error.InvalidAlg;
             }
+            // fips-exempt: non-security — non-FIPS algorithm on the seam's
+            // consumer-owned non-fips escape hatch. ChaCha20-Poly1305 is not
+            // FIPS-approved and is absent from the crypto_backend Aead policy
+            // (AES-GCM only); this branch returns InvalidAlg under -Dfips=true.
             const ChaCha = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
             ChaCha.decrypt(plaintext, envelope.ciphertext, envelope.tag, aad, envelope.nonce, fek[0..32].*) catch |err| switch (err) {
                 error.AuthenticationFailed => {
@@ -318,6 +326,9 @@ pub const key_wrap = if (backend.fips_enabled) struct {} else struct {
     /// Returns a fixed 72-byte array: nonce(24) || tag(16) || ciphertext(32).
     /// Stack-only operation — no allocator required.
     pub fn wrapKey32(key: [32]u8, wrapping_key: [32]u8) [wrapped_key_size]u8 {
+        // fips-exempt: non-security — non-FIPS algorithm; this whole
+        // `key_wrap` namespace is compiled out under -Dfips=true (the seam
+        // has no XChaCha20-Poly1305). Consumer-owned non-fips escape hatch.
         const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
         var result: [wrapped_key_size]u8 = undefined;
 
@@ -336,6 +347,9 @@ pub const key_wrap = if (backend.fips_enabled) struct {} else struct {
     /// Input format: nonce(24) || tag(16) || ciphertext(32).
     /// Stack-only operation — no allocator required.
     pub fn unwrapKey32(wrapped: *const [wrapped_key_size]u8, wrapping_key: [32]u8) ![32]u8 {
+        // fips-exempt: non-security — non-FIPS algorithm; this whole
+        // `key_wrap` namespace is compiled out under -Dfips=true (the seam
+        // has no XChaCha20-Poly1305). Consumer-owned non-fips escape hatch.
         const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 
         const nonce = wrapped[0..24].*;
