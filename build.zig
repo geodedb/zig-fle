@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "with_otel", with_otel);
     build_options.addOption(bool, "fips", fips);
+    build_options.addOption([]const u8, "package_name", "fle");
     const build_options_mod = build_options.createModule();
 
     const link = @import("src/link.zig");
