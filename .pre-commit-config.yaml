@@ -58,7 +58,7 @@ repos:
   # Shell script linting
   # =============================================================================
 - repo: https://github.com/shellcheck-py/shellcheck-py
-  rev: 745eface02aef23e168a8afb6b5737818efbea95  # frozen: v0.11.0.1
+  rev: a6564f5d57444e123433a5c9af733e3975c77229  # frozen: v0.11.0.1-1
   hooks:
   - id: shellcheck
     args: [--severity=error, --shell=bash]
@@ -68,7 +68,7 @@ repos:
   # Python linting (for test scripts and tools)
   # =============================================================================
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: 45ef068da5f21267bb2a7ec4a623092959f09ce5  # frozen: v0.14.14
+  rev: 44b5042edab9382aba712eed4f9c7bab7a3d6a3e  # frozen: v0.17.0
   hooks:
   - id: ruff
     args: [--fix, --exit-non-zero-on-fix]
@@ -80,7 +80,7 @@ repos:
   # Markdown linting
   # =============================================================================
 - repo: https://github.com/igorshubovych/markdownlint-cli
-  rev: 0d9fcb51a54f3b750b911c054b4bd1a590f1b592  # frozen: v0.43.0
+  rev: 5b5dddc4fb0f83c3ea1fc5616fa63e115dce83e0  # frozen: v0.49.1
   hooks:
   - id: markdownlint
     args: [--fix, --disable, MD013, MD033, MD041, MD024, MD060, MD036, MD051, MD052, MD055, --]
@@ -100,7 +100,7 @@ repos:
   # Commit message validation (Conventional Commits)
   # =============================================================================
 - repo: https://github.com/commitizen-tools/commitizen
-  rev: 5857050259653556030b6b1f19f53e8868a427f6  # frozen: v4.12.1
+  rev: f6be1834c1d5c46f3ad126fb112ca599b6ade685  # frozen: v4.19.2
   hooks:
   - id: commitizen
     stages: [commit-msg]
