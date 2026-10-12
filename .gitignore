@@ -56,3 +56,6 @@ __pycache__/
 
 # OpenSSL FIPS build from `make deps` in CI (project-relative prefix)
 .openssl-fips/
+
+# Keep the hook environment regression test in the source tree.
+!/scripts/test_hook_env.py
