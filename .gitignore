@@ -53,3 +53,6 @@ coverage/
 # Local git worktrees (per-feature isolated checkouts)
 .worktrees/
 __pycache__/
+
+# OpenSSL FIPS build from `make deps` in CI (project-relative prefix)
+.openssl-fips/
