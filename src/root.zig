@@ -75,7 +75,7 @@ const std = @import("std");
 const crypto_backend = @import("crypto_backend");
 
 /// Library version
-pub const version = "0.1.17";
+pub const version = "0.1.18";
 
 // ============================================================================
 // Submodule re-exports

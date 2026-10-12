@@ -1,6 +1,6 @@
 .{
     .name = .fle,
-    .version = "0.1.17",
+    .version = "0.1.18",
     .fingerprint = 0x478bdffc95f027d4,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{

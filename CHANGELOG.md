@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.18] - 2026-10-12
+
+- Verify OpenSSL release signatures against exact primary-key fingerprints, including certified signing subkeys (SONNY-4865).
+- Require authenticated OpenSSL 3.6.5 provisioning and real-signature regression checks in CI.
+- Pin the formatter component to Zig 0.16.0 so release checks use the project compiler.
+
 ## [Unreleased]
 
 ## [0.1.13] - 2026-09-15
