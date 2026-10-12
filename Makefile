@@ -130,3 +130,10 @@ help:
 	@echo "Maintenance:"
 	@echo "  clean                Remove build artifacts"
 	@echo "  help                 Show this help message"
+
+.PHONY: deps
+# Build + install the latest OpenSSL 3.x with the FIPS provider into
+# $(OPENSSL_PREFIX) (default /usr/local/ssl). Required before test-dual /
+# the CI test-fips job. Idempotent; re-runs upgrade in place.
+deps:
+	OPENSSL_PREFIX=$(or $(OPENSSL_PREFIX),/usr/local/ssl) ./scripts/install-openssl-fips.sh
