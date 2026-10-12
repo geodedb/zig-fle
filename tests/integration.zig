@@ -250,7 +250,10 @@ test "integration: AES-256-GCM works under both fips modes" {
 // ============================================================================
 
 test "integration: version is defined" {
-    try std.testing.expectEqualStrings("0.1.0", fle.version);
+    // A hard-coded copy of the version went stale on every release bump and
+    // failed test-integration on main. Assert the shape instead: a valid
+    // semantic version (parse rejects an empty string).
+    _ = try std.SemanticVersion.parse(fle.version);
 }
 
 // ============================================================================
