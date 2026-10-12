@@ -18,6 +18,8 @@ include:
 
   # Code quality
   - component: gitlab.com/devnw/ci-catalog/zig-format@v1.55.8
+    inputs:
+      zig_version: "0.16.0"
 
   # SBOM
   - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.55.8
