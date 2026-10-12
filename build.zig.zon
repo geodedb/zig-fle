@@ -5,27 +5,21 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .thread_pool = .{
-            .url = "git+https://gitlab.com/devnw/zig/thread-pool.git?ref=v0.2.7#54a2ddda1a356c32ba2e4df70691459570fb6339",
-            .hash = "thread_pool-0.2.7-11B1BvRneQBnMkDnRbKd76THvZn4ZhDhmlWQw-aziWQm",
+            .url = "git+https://gitlab.com/devnw/zig/thread-pool.git?ref=v0.2.8#2161d8e77beb6f9d6d8664b4406c739ef3a6cc81",
+            .hash = "thread_pool-0.2.8-11B1BrrSeQD3WHNJ-oyNkrfcHLp5AOW1Zgr4QTGu7pb4",
         },
         .otel = .{
-            .url = "git+https://gitlab.com/devnw/zig/otel.git?ref=v0.1.24#2e5e5e4609c8f452c75846c91a59de76417e85f4",
-            .hash = "otel-0.1.24-B0v3liX3NQBKK7oqRuCRfgu0FIwR6nNQOGpIjs8YoCrY",
+            .url = "git+https://gitlab.com/devnw/zig/otel.git?ref=v0.1.25#271cdfbfde389767886c6ba3656e584b80d54979",
+            .hash = "otel-0.1.25-B0v3lir4NQD1YLvBQTNUl4C63ehXde1RR_aRyO-bbzlY",
             .lazy = true,
         },
-        // Local PATH dependency for the FIPS backend. There is no published
-        // remote yet, so it is wired as an absolute path. `.lazy = true`
+        // FIPS-140-3 backend, pinned to the fips v0.1.3 release. `.lazy = true`
         // keeps a default (-Dfips=false) build from ever resolving it: the
         // dep is reached only by `b.lazyDependency("fips", ...)` in build.zig
-        // when -Dfips=true. The eventual production form is the git+https
-        // lazy entry:
-        //   .fips = .{
-        //       .url = "git+https://gitlab.com/devnw/zig/fips.git?ref=v0.1.0#<commit-sha>",
-        //       .hash = "<zig-package-hash>",
-        //       .lazy = true,
-        //   },
+        // when -Dfips=true.
         .fips = .{
-            .path = "../../../../../devnw/zig/fips",
+            .url = "git+https://gitlab.com/devnw/zig/fips.git?ref=v0.1.3#f7395a3bab363d75b651be0775f43dd037c14a9c",
+            .hash = "fips-0.1.3-1wf3natvCACgXCcDLw4o0KwZtrNNpXyyRp1hNIA9oi2m",
             .lazy = true,
         },
     },

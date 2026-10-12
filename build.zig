@@ -63,10 +63,8 @@ pub fn build(b: *std.Build) void {
     });
 
     // fips backend: resolved LAZILY only when -Dfips=true so the disabled
-    // build never fetches OpenSSL-linked code. The production form fetches
-    // the published package; locally it is wired as a path dependency in
-    // build.zig.zon. Eventual production lazy form:
-    //   .fips = .{ .url = "git+https://gitlab.com/devnw/zig/fips.git?ref=v0.1.0#<sha>", .hash = "<hash>", .lazy = true }
+    // build never fetches OpenSSL-linked code. build.zig.zon pins the
+    // published fips release as a lazy git+https dependency.
     if (fips) {
         if (b.lazyDependency("fips", .{ .target = target, .optimize = optimize })) |fips_dep| {
             const fips_mod = fips_dep.module("fips");
