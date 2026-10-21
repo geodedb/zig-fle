@@ -287,6 +287,7 @@ fuzz:
 # real jobs; evaluate those. (Same fix as devnw/zig/uuid fc0d25fd.)
 workflow:
   auto_cancel:
+    on_job_failure: all
     on_new_commit: interruptible
   rules:
     - if: '$CI_COMMIT_TAG'
