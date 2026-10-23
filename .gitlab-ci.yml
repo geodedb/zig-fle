@@ -383,6 +383,6 @@ test-portable-entropy-macos:
   script:
     - zig test -lc --dep std_shim -Mroot=tests/portable_entropy_test.zig -Mstd_shim=src/std_shim.zig
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    # Workflow validates branches and intentionally excludes MR pipelines.
+    - if: '$CI_COMMIT_BRANCH'
     - if: '$CI_COMMIT_TAG'
