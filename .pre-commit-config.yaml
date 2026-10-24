@@ -68,7 +68,7 @@ repos:
   # Python linting (for test scripts and tools)
   # =============================================================================
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: 44b5042edab9382aba712eed4f9c7bab7a3d6a3e  # frozen: v0.17.0
+  rev: f368fb366ff7f2f808dd324b83a6d32267799e19  # frozen: v0.17.2
   hooks:
   - id: ruff
     args: [--fix, --exit-non-zero-on-fix]
@@ -100,7 +100,7 @@ repos:
   # Commit message validation (Conventional Commits)
   # =============================================================================
 - repo: https://github.com/commitizen-tools/commitizen
-  rev: 57217c394fff5064bedd48421fe4b6f5f73aad47  # frozen: v4.19.2
+  rev: f690817de25831a37094ca35af5ada05c909ff1c  # frozen: v4.19.3
   hooks:
   - id: commitizen
     stages: [commit-msg]
