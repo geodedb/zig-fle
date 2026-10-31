@@ -68,7 +68,7 @@ repos:
   # Python linting (for test scripts and tools)
   # =============================================================================
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: f368fb366ff7f2f808dd324b83a6d32267799e19  # frozen: v0.17.2
+  rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c  # frozen: v0.17.3
   hooks:
   - id: ruff
     args: [--fix, --exit-non-zero-on-fix]
@@ -80,7 +80,7 @@ repos:
   # Markdown linting
   # =============================================================================
 - repo: https://github.com/igorshubovych/markdownlint-cli
-  rev: 5b5dddc4fb0f83c3ea1fc5616fa63e115dce83e0  # frozen: v0.49.1
+  rev: cbcdc463be5464e25e3e955a511599a67b9b987f  # frozen: v0.50.0
   hooks:
   - id: markdownlint
     args: [--fix, --disable, MD013, MD033, MD041, MD024, MD060, MD036, MD051, MD052, MD055, --]
