@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] - 2026-11-17
+
+### Changed
+
+- otel v0.1.28 -> v0.1.30, whose tree (slog, json, config, yaml, metrics, tls, grpc-zig v0.1.16) is on thread-pool v0.2.11, so this library and its consumers resolve a single otel and thread-pool (SONNY-6630).
+
 ## [0.1.18] - 2026-10-12
 
 - Verify OpenSSL release signatures against exact primary-key fingerprints, including certified signing subkeys (SONNY-4865).
